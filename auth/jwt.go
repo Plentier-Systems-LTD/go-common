@@ -38,26 +38,12 @@ type TokenPair struct {
 func GenerateTokenPair(cfg Config, userID, email string) (TokenPair, error) {
 	now := time.Now()
 
-	access, err := signClaims(cfg.Secret, Claims{
-		UserID: userID,
-		Email:  email,
-		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(cfg.accessTTL())),
-		},
-	})
+	access, err := newToken(cfg, userID, email, cfg.accessTTL(), now)
 	if err != nil {
 		return TokenPair{}, err
 	}
 
-	refresh, err := signClaims(cfg.Secret, Claims{
-		UserID: userID,
-		Email:  email,
-		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(cfg.refreshTTL())),
-		},
-	})
+	refresh, err := newToken(cfg, userID, email, cfg.refreshTTL(), now)
 	if err != nil {
 		return TokenPair{}, err
 	}
@@ -65,8 +51,16 @@ func GenerateTokenPair(cfg Config, userID, email string) (TokenPair, error) {
 	return TokenPair{AccessToken: access, RefreshToken: refresh}, nil
 }
 
-func signClaims(secret string, claims Claims) (string, error) {
-	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
+func newToken(cfg Config, userID, email string, ttl time.Duration, now time.Time) (string, error) {
+	claims := Claims{
+		UserID: userID,
+		Email:  email,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+		},
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(cfg.Secret))
 }
 
 // VerifyToken validates a token's signature and expiry and returns its claims.

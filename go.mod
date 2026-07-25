@@ -1,4 +1,4 @@
-module github.com/Plentier-Systems-LTD/plentier-go-common
+module github.com/Plentier-Systems-LTD/go-common
 
 go 1.26.2
 
