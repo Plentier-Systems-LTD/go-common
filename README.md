@@ -14,19 +14,13 @@ actually use. Each package documents itself in its own README.
 go-common/
 ├── auth/         User model, registration/login, Apple/Google login, JWTs — no framework, no storage dependency
 ├── billing/      Apple/Google purchase verification — no framework, no storage dependency
-<<<<<<< HEAD
+├── chat/         Gemini-backed AI chat replies — no framework, no storage dependency
+├── voice/        OpenAI Whisper audio transcription — no framework dependency
 ├── fiber/
 │   ├── auth/     Fiber middleware wrapping auth (RequireAuth, OptionalAuth, User)
 │   └── cors/     Fiber CORS middleware
 └── gorm/
     └── auth/     Ready-made GORM UserStore implementation for auth.Service
-=======
-├── chat/         Gemini-backed AI chat replies — no framework, no storage dependency
-├── voice/        OpenAI Whisper audio transcription — no framework dependency
-└── fiber/
-    ├── auth/     Fiber middleware wrapping auth (RequireAuth, OptionalAuth, User)
-    └── cors/     Fiber CORS middleware
->>>>>>> 125158e48a797d24039ac2c561d1e906a541d8bf
 ```
 
 A service on a different framework (chi, net/http, gin, ...) or a different ORM can depend on
@@ -47,25 +41,6 @@ integrations are opt-in, nested packages.
 import fibercors "github.com/Plentier-Systems-LTD/go-common/fiber/cors"
 
 app.Use(fibercors.New(fibercors.Config{AllowOrigins: "*"}))
-```
-
-<<<<<<< HEAD
-=======
-### `billing`
-
-Verifies Apple App Store / Google Play purchase receipts and parses their webhook
-notifications. Storage- and framework-agnostic — verification returns a `PurchaseResult`;
-persisting subscription/transaction state is left to each service's own database.
-
-```go
-apple, err := billing.NewAppleProvider(sharedSecret, rootCAPEM)
-google, err := billing.NewGoogleProvider(serviceAccountJSON, packageName, pubsubAudience, pubsubServiceAccountEmail)
-
-result, err := apple.VerifyPurchase(ctx, billing.VerifyRequest{
-    UserID:      userID,
-    ReceiptData: signedTransactionJWS,
-})
-// result.ExpiresAt, result.IsRefund, result.ProductID, ... -> persist as you see fit
 ```
 
 ### `chat`
@@ -98,7 +73,6 @@ text, err := client.Transcribe(ctx, voice.TranscribeRequest{
 })
 ```
 
->>>>>>> 125158e48a797d24039ac2c561d1e906a541d8bf
 ## Versioning
 
 Tag releases (`git tag vX.Y.Z`) and consume with `go get github.com/Plentier-Systems-LTD/go-common@vX.Y.Z`.
