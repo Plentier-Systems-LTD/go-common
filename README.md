@@ -14,6 +14,8 @@ dependency they actually use.
 go-common/
 ├── auth/         JWT issuance/verification — no framework dependency
 ├── billing/      Apple/Google purchase verification — no framework, no storage dependency
+├── chat/         Gemini-backed AI chat replies — no framework, no storage dependency
+├── voice/        OpenAI Whisper audio transcription — no framework dependency
 └── fiber/
     ├── auth/     Fiber middleware wrapping auth (RequireAuth, OptionalAuth, User)
     └── cors/     Fiber CORS middleware
@@ -75,6 +77,36 @@ result, err := apple.VerifyPurchase(ctx, billing.VerifyRequest{
     ReceiptData: signedTransactionJWS,
 })
 // result.ExpiresAt, result.IsRefund, result.ProductID, ... -> persist as you see fit
+```
+
+### `chat`
+
+Generates conversational AI replies via Gemini. Extracted from Therapist-api's chat feature and
+generalized: the persona (system prompt) and conversation history are supplied by the caller
+instead of being hardcoded and read from a database, so each service brings its own assistant
+persona and owns its own message storage.
+
+```go
+client, err := chat.New(ctx, chat.Config{APIKey: os.Getenv("GEMINI_API_KEY")})
+
+reply, err := client.GenerateReply(ctx, systemPrompt, history, "What does this charge cover?")
+// history is []chat.Message{{Role: chat.RoleUser, ...}, {Role: chat.RoleModel, ...}, ...},
+// oldest first — fetch it from your own chat_messages table before calling.
+```
+
+### `voice`
+
+Transcribes recorded audio to text via OpenAI's Whisper API. Framework- and storage-agnostic.
+Handlers should depend on the `Transcriber` interface, not `WhisperClient` directly, so tests can
+fake it.
+
+```go
+client, err := voice.NewWhisperClient(voice.Config{APIKey: os.Getenv("OPENAI_API_KEY")})
+
+text, err := client.Transcribe(ctx, voice.TranscribeRequest{
+    Filename: "recording.m4a",
+    Audio:    audioReader,
+})
 ```
 
 ## Versioning
