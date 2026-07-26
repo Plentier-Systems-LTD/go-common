@@ -31,16 +31,24 @@ go get github.com/Plentier-Systems-LTD/go-common@latest
   code. `EmailSender` is pluggable (bring SES/SendGrid/Postmark, or use the zero-dependency
   `NewSMTPSender`); `VerificationStore` persists outstanding codes. Codes expire, are attempt-
   limited, and are rate-limited on resend by default — see [Email verification](#email-verification) below.
+- **`NewAsyncEmailSender`** — wraps any `EmailSender` so sending happens on a background worker
+  pool instead of blocking the caller (e.g. an HTTP handler) on the provider round trip.
+- **`RenderVerificationEmailHTML` / `NewBrandedHTMLBody`** — a built-in, branded HTML email
+  template for the code, rendered via `html/template` (so brand config can't inject markup). The
+  footer's copyright is always Plentier Systems; only the brand name/logo/accent color vary.
 
 ## Design (SOLID)
 
 - **Single responsibility** — each file owns one concern: `tokens.go` (JWTs), `password.go`
-  (hashing), `apple.go` / `google.go` (one identity provider each), `verification.go` /
-  `smtp.go` (email codes), `service.go` (orchestration), `user.go` (the embeddable user model).
-- **Open/closed** — new social login providers are added by implementing `IdentityProvider`;
-  `Service` never changes.
+  (hashing), `apple.go` / `google.go` (one identity provider each), `verification.go` (codes),
+  `smtp.go` / `template.go` (email delivery/rendering), `async.go` (background delivery),
+  `service.go` (orchestration), `user.go` (the embeddable user model).
+- **Open/closed** — new social login providers are added by implementing `IdentityProvider`, and
+  synchronous delivery becomes asynchronous by wrapping in `NewAsyncEmailSender`; `Service` never
+  changes for either.
 - **Liskov substitution** — any type embedding `BaseUser` can stand in wherever the `User`
-  interface is expected, since the promoted methods satisfy it automatically.
+  interface is expected, since the promoted methods satisfy it automatically. `AsyncEmailSender`
+  itself implements `EmailSender`, so it can stand in anywhere one is expected.
 - **Interface segregation** — `UserStore`, `PasswordHasher`, `IdentityProvider`,
   `VerificationStore`, and `EmailSender` are small, single-purpose interfaces instead of one
   large "auth backend" interface.
@@ -288,6 +296,11 @@ emailSender, err := auth.NewSMTPSender(auth.SMTPConfig{
     Username: "apikey",
     Password: os.Getenv("SENDGRID_API_KEY"),
     From:     "MyApp <noreply@myapp.com>",
+    Subject:  "Your MyApp verification code",
+    HTMLBody: auth.NewBrandedHTMLBody(auth.EmailBranding{
+        BrandName: "MyApp",
+        LogoURL:   "https://myapp.com/logo.png", // optional
+    }),
 })
 if err != nil {
     log.Fatal(err)
@@ -310,17 +323,69 @@ authSvc, err := auth.NewService[*models.User](
 
 `NewSMTPSender` works against Gmail, Amazon SES SMTP, SendGrid SMTP, Mailgun SMTP, and similar —
 it's the zero-dependency default. Using a provider's HTTP API instead (e.g. the SendGrid Web
-API) just means implementing `EmailSender` yourself:
+API) just means implementing `EmailSender` yourself, optionally still using the built-in
+template for the HTML part:
 
 ```go
-type SendGridSender struct{ client *sendgrid.Client }
+type SendGridSender struct {
+    client *sendgrid.Client
+    html   func(code string) (string, error)
+}
+
+func NewSendGridSender(client *sendgrid.Client, branding auth.EmailBranding) *SendGridSender {
+    return &SendGridSender{client: client, html: auth.NewBrandedHTMLBody(branding)}
+}
 
 func (s *SendGridSender) SendVerificationCode(ctx context.Context, to, code string) error {
-    // build and send your own templated email via the provider's API
+    html, err := s.html(code)
+    if err != nil {
+        return err
+    }
+    // build and send html via the provider's API
 }
 ```
 
-### 2. Send a code, then verify it
+**Branding.** `EmailBranding.BrandName` (and optionally `LogoURL`, `AccentColor`) is the only
+thing you customize — the template's footer always reads "© \<year\> Plentier Systems. All
+rights reserved.", regardless of `BrandName`, since these templates ship as part of go-common.
+`BrandName`/`LogoURL` are rendered through `html/template`, so they're safe to source from
+config without risking HTML injection.
+
+### 2. Don't make the caller wait on email delivery
+
+`Service.SendVerificationEmail` calls your `EmailSender` synchronously — fine for a fast HTTP
+API relay, but a real SMTP round trip can take a second or more, which you don't want blocking
+an HTTP handler. Wrap whatever `EmailSender` you built above in `NewAsyncEmailSender`; `Service`
+doesn't need to know or care that it's not synchronous:
+
+```go
+emailSender, err := auth.NewSMTPSender(auth.SMTPConfig{ /* ... */ })
+if err != nil {
+    log.Fatal(err)
+}
+
+asyncSender := auth.NewAsyncEmailSender(emailSender, auth.AsyncEmailSenderConfig{
+    OnError: func(to string, err error) {
+        log.Printf("failed to deliver verification email to %s: %v", to, err)
+    },
+})
+defer asyncSender.Close() // waits for in-flight sends to finish on shutdown
+
+authSvc, err := auth.NewService[*models.User](
+    gormauth.NewStore[models.User](db),
+    auth.Config{Secret: os.Getenv("JWT_SECRET")},
+    auth.WithVerificationStore[*models.User](verificationStore),
+    auth.WithEmailSender[*models.User](asyncSender),
+)
+```
+
+`SendVerificationEmail` now returns as soon as the code is generated, stored, and queued — the
+actual delivery happens on a background worker pool. Since the caller can no longer see delivery
+errors once queued, wire `OnError` to your logger/error tracker. Call `asyncSender.Close()`
+during graceful shutdown so a code queued right before exit still gets delivered instead of
+silently dropped.
+
+### 3. Send a code, then verify it
 
 ```go
 // handlers/auth.go
