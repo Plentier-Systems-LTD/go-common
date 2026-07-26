@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 // Option configures a Service at construction time.
@@ -24,6 +27,24 @@ func WithAppleProvider[T User](p IdentityProvider) Option[T] {
 	return func(s *Service[T]) { s.providers[ProviderApple] = p }
 }
 
+// WithVerificationStore enables SendVerificationEmail/VerifyEmail by
+// giving Service somewhere to persist outstanding codes.
+func WithVerificationStore[T User](store VerificationStore) Option[T] {
+	return func(s *Service[T]) { s.verificationStore = store }
+}
+
+// WithEmailSender enables SendVerificationEmail by giving Service a way
+// to actually deliver codes.
+func WithEmailSender[T User](sender EmailSender) Option[T] {
+	return func(s *Service[T]) { s.emailSender = sender }
+}
+
+// WithVerificationConfig overrides the default code length/TTL/attempt
+// limits used by SendVerificationEmail/VerifyEmail.
+func WithVerificationConfig[T User](cfg VerificationConfig) Option[T] {
+	return func(s *Service[T]) { s.verificationCfg = cfg.withDefaults() }
+}
+
 // Service orchestrates registration, login, social login, and token
 // issuance. It depends only on the interfaces in this package (UserStore,
 // PasswordHasher, IdentityProvider) — never on a concrete database or web
@@ -36,22 +57,29 @@ type Service[T User] struct {
 	hasher    PasswordHasher
 	cfg       Config
 	providers map[Provider]IdentityProvider
+
+	verificationStore VerificationStore
+	emailSender       EmailSender
+	verificationCfg   VerificationConfig
 }
 
 // NewService wires a Service around a UserStore and token Config.
 // Social login providers and the password hasher are optional
 // (WithGoogleProvider, WithAppleProvider, WithPasswordHasher); password
-// hashing defaults to bcrypt.
+// hashing defaults to bcrypt. Email verification (SendVerificationEmail,
+// VerifyEmail) is disabled until both WithVerificationStore and
+// WithEmailSender are supplied.
 func NewService[T User](store UserStore[T], cfg Config, opts ...Option[T]) (*Service[T], error) {
 	if cfg.Secret == "" {
 		return nil, errors.New("auth: Config.Secret is required")
 	}
 
 	s := &Service[T]{
-		store:     store,
-		hasher:    NewBcryptHasher(),
-		cfg:       cfg.withDefaults(),
-		providers: map[Provider]IdentityProvider{},
+		store:           store,
+		hasher:          NewBcryptHasher(),
+		cfg:             cfg.withDefaults(),
+		providers:       map[Provider]IdentityProvider{},
+		verificationCfg: VerificationConfig{}.withDefaults(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -181,4 +209,102 @@ func (s *Service[T]) Refresh(ctx context.Context, refreshToken string) (*TokenPa
 	}
 
 	return GenerateTokenPair(s.cfg, claims.UserID, claims.Email)
+}
+
+// SendVerificationEmail generates a fresh numeric code, stores it, and
+// emails it to email via the configured EmailSender. Call it after
+// Register, or whenever a user needs to (re)verify their email — it
+// doesn't require the email to belong to an existing user, so it also
+// works for pre-registration verification flows.
+//
+// Requires WithVerificationStore and WithEmailSender; returns
+// ErrEmailVerificationNotConfigured otherwise. Returns
+// ErrVerificationCodeResendTooSoon if called again for the same email
+// within VerificationConfig.ResendCooldown.
+func (s *Service[T]) SendVerificationEmail(ctx context.Context, email string) error {
+	if s.verificationStore == nil || s.emailSender == nil {
+		return ErrEmailVerificationNotConfigured
+	}
+
+	email = NormalizeEmail(email)
+
+	if existing, err := s.verificationStore.FindLatest(ctx, email); err == nil {
+		if time.Now().Before(existing.CreatedAt.Add(s.verificationCfg.ResendCooldown)) {
+			return ErrVerificationCodeResendTooSoon
+		}
+	} else if !errors.Is(err, ErrVerificationCodeNotFound) {
+		return err
+	}
+
+	code, err := generateNumericCode(s.verificationCfg.CodeLength)
+	if err != nil {
+		return err
+	}
+
+	record := VerificationCode{
+		ID:        uuid.NewString(),
+		Email:     email,
+		CodeHash:  hashCode(code),
+		ExpiresAt: time.Now().Add(s.verificationCfg.TTL),
+	}
+	if err := s.verificationStore.Create(ctx, record); err != nil {
+		return fmt.Errorf("auth: failed to store verification code: %w", err)
+	}
+
+	if err := s.emailSender.SendVerificationCode(ctx, email, code); err != nil {
+		return fmt.Errorf("auth: failed to send verification email: %w", err)
+	}
+	return nil
+}
+
+// VerifyEmail checks a code a user submitted against the most recent one
+// issued for email. On success it marks the matching user's email as
+// verified and consumes the code so it can't be reused.
+//
+// Requires WithVerificationStore; returns ErrEmailVerificationNotConfigured
+// otherwise. Returns ErrVerificationCodeExpired once the code's TTL has
+// passed, ErrTooManyAttempts once VerificationConfig.MaxAttempts wrong
+// guesses have been made (request a new code with SendVerificationEmail
+// to recover), and ErrInvalidVerificationCode for any other mismatch.
+func (s *Service[T]) VerifyEmail(ctx context.Context, email, code string) (T, error) {
+	var zero T
+
+	if s.verificationStore == nil {
+		return zero, ErrEmailVerificationNotConfigured
+	}
+
+	email = NormalizeEmail(email)
+
+	record, err := s.verificationStore.FindLatest(ctx, email)
+	if err != nil {
+		return zero, ErrInvalidVerificationCode
+	}
+
+	if time.Now().After(record.ExpiresAt) {
+		return zero, ErrVerificationCodeExpired
+	}
+
+	if record.Attempts >= s.verificationCfg.MaxAttempts {
+		return zero, ErrTooManyAttempts
+	}
+
+	if !codeMatches(record.CodeHash, code) {
+		if err := s.verificationStore.IncrementAttempts(ctx, record.ID); err != nil {
+			return zero, fmt.Errorf("auth: failed to record verification attempt: %w", err)
+		}
+		return zero, ErrInvalidVerificationCode
+	}
+
+	user, err := s.store.FindByEmail(ctx, email)
+	if err != nil {
+		return zero, err
+	}
+
+	user.SetEmailVerified(true)
+	if err := s.store.Update(ctx, user); err != nil {
+		return zero, fmt.Errorf("auth: failed to mark email verified: %w", err)
+	}
+
+	_ = s.verificationStore.Delete(ctx, record.ID)
+	return user, nil
 }

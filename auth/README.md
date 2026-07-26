@@ -27,18 +27,23 @@ go get github.com/Plentier-Systems-LTD/go-common@latest
   so one can't be used in place of the other.
 - **`PasswordHasher`** — bcrypt by default (`NewBcryptHasher`), swappable via
   `WithPasswordHasher` if a project needs a different algorithm.
+- **`SendVerificationEmail` / `VerifyEmail`** — generate and check a numeric email verification
+  code. `EmailSender` is pluggable (bring SES/SendGrid/Postmark, or use the zero-dependency
+  `NewSMTPSender`); `VerificationStore` persists outstanding codes. Codes expire, are attempt-
+  limited, and are rate-limited on resend by default — see [Email verification](#email-verification) below.
 
 ## Design (SOLID)
 
 - **Single responsibility** — each file owns one concern: `tokens.go` (JWTs), `password.go`
-  (hashing), `apple.go` / `google.go` (one identity provider each), `service.go`
-  (orchestration), `user.go` (the embeddable user model).
+  (hashing), `apple.go` / `google.go` (one identity provider each), `verification.go` /
+  `smtp.go` (email codes), `service.go` (orchestration), `user.go` (the embeddable user model).
 - **Open/closed** — new social login providers are added by implementing `IdentityProvider`;
   `Service` never changes.
 - **Liskov substitution** — any type embedding `BaseUser` can stand in wherever the `User`
   interface is expected, since the promoted methods satisfy it automatically.
-- **Interface segregation** — `UserStore`, `PasswordHasher`, and `IdentityProvider` are small,
-  single-purpose interfaces instead of one large "auth backend" interface.
+- **Interface segregation** — `UserStore`, `PasswordHasher`, `IdentityProvider`,
+  `VerificationStore`, and `EmailSender` are small, single-purpose interfaces instead of one
+  large "auth backend" interface.
 - **Dependency inversion** — `Service` is constructed with those interfaces injected in
   (`NewService(store, cfg, opts...)`); it never imports GORM, Fiber, or a specific provider SDK.
 
@@ -263,6 +268,116 @@ against your `UserStore`, and `fiberauth.RequireAuth` protects routes using the 
 the service signs tokens with. Swapping ORM or web framework later only means writing a new
 `UserStore` or a new middleware file — `Service` and everything that calls it stays untouched.
 
+## Email verification
+
+`BaseUser.EmailVerified` starts `false` for password accounts (Google/Apple logins set it from
+the identity provider's own `email_verified` claim instead — see `OAuthLogin`). To let users
+verify a password account's email with a one-time code:
+
+### 1. Wire a `VerificationStore` and `EmailSender` into the service
+
+```go
+verificationStore, err := gormauth.NewVerificationStore(db) // migrates its own table
+if err != nil {
+    log.Fatal(err)
+}
+
+emailSender, err := auth.NewSMTPSender(auth.SMTPConfig{
+    Host:     "smtp.sendgrid.net",
+    Port:     587,
+    Username: "apikey",
+    Password: os.Getenv("SENDGRID_API_KEY"),
+    From:     "MyApp <noreply@myapp.com>",
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+authSvc, err := auth.NewService[*models.User](
+    gormauth.NewStore[models.User](db),
+    auth.Config{Secret: os.Getenv("JWT_SECRET")},
+    auth.WithVerificationStore[*models.User](verificationStore),
+    auth.WithEmailSender[*models.User](emailSender),
+    // Optional — these are the defaults:
+    auth.WithVerificationConfig[*models.User](auth.VerificationConfig{
+        CodeLength:     6,
+        TTL:            15 * time.Minute,
+        MaxAttempts:    5,
+        ResendCooldown: 60 * time.Second,
+    }),
+)
+```
+
+`NewSMTPSender` works against Gmail, Amazon SES SMTP, SendGrid SMTP, Mailgun SMTP, and similar —
+it's the zero-dependency default. Using a provider's HTTP API instead (e.g. the SendGrid Web
+API) just means implementing `EmailSender` yourself:
+
+```go
+type SendGridSender struct{ client *sendgrid.Client }
+
+func (s *SendGridSender) SendVerificationCode(ctx context.Context, to, code string) error {
+    // build and send your own templated email via the provider's API
+}
+```
+
+### 2. Send a code, then verify it
+
+```go
+// handlers/auth.go
+func (h *AuthHandler) SendVerificationEmail(c *fiber.Ctx) error {
+    var req struct {
+        Email string `json:"email"`
+    }
+    if err := c.BodyParser(&req); err != nil {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
+    }
+
+    if err := h.svc.SendVerificationEmail(c.UserContext(), req.Email); err != nil {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+    }
+    return c.SendStatus(fiber.StatusOK)
+}
+
+func (h *AuthHandler) VerifyEmail(c *fiber.Ctx) error {
+    var req struct {
+        Email string `json:"email"`
+        Code  string `json:"code"`
+    }
+    if err := c.BodyParser(&req); err != nil {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
+    }
+
+    user, err := h.svc.VerifyEmail(c.UserContext(), req.Email, req.Code)
+    if err != nil {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+    }
+    return c.JSON(fiber.Map{"user": user})
+}
+```
+
+```go
+// routes/routes.go
+v1.Post("/auth/send-verification-email", h.SendVerificationEmail)
+v1.Post("/auth/verify-email", h.VerifyEmail)
+```
+
+Call `SendVerificationEmail` right after `Register` if you want verification to kick off
+immediately, or leave it for the user to trigger from a "resend code" button — both are just
+calling the same method. Whether to block unverified users out of protected routes (checking
+`claims`/your stored user's `EmailVerified`) is a product decision left to your own middleware;
+`Service` doesn't enforce it.
+
+### Defaults and failure modes
+
+- Codes are 6 digits, valid for 15 minutes, and stored as a SHA-256 hash (never the raw code) —
+  tune via `WithVerificationConfig`.
+- `VerifyEmail` locks a code out after 5 wrong guesses (`ErrTooManyAttempts`); the user must
+  request a fresh one.
+- `SendVerificationEmail` refuses to send a second code within 60 seconds of the last one
+  (`ErrVerificationCodeResendTooSoon`), to keep it from being used to spam an inbox.
+- Both return `ErrEmailVerificationNotConfigured` if the service wasn't built with
+  `WithVerificationStore`/`WithEmailSender` — verification is entirely opt-in.
+
 ## Companion packages
 
 ### `fiber/auth`
@@ -304,3 +419,7 @@ Using a different database? Implement `auth.UserStore[*models.User]` yourself �
 methods (`Create`, `Update`, `FindByID`, `FindByEmail`, `FindByProvider`); see
 [`store.go`](store.go) for the exact contract, including that lookup misses must return
 `auth.ErrUserNotFound`.
+
+`gorm/auth` also provides `NewVerificationStore(db)`, a ready-made `auth.VerificationStore` for
+[email verification](#email-verification) — unlike `Store[T]`, it migrates its own table since
+the schema is fixed and owned by `auth`, not by your project.
