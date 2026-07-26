@@ -1,77 +1,59 @@
-// Package auth provides a Fiber middleware around the framework-agnostic
-// github.com/Plentier-Systems-LTD/go-common/auth package. Only import this
-// package from Fiber services; non-Fiber consumers depend on the parent
-// auth package alone.
+// Package auth provides Fiber middleware on top of go-common/auth's
+// framework-agnostic JWT verification.
 package auth
 
 import (
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
-
 	sharedauth "github.com/Plentier-Systems-LTD/go-common/auth"
+	"github.com/gofiber/fiber/v2"
 )
 
-const ctxUserKey = "go_common_auth_user"
+const localsKey = "go-common:auth:claims"
 
-// RequireAuth rejects requests without a valid Bearer token and stores the
-// verified claims in the request context for handlers to read via User.
+// RequireAuth rejects requests without a valid Bearer access token, and
+// otherwise stores its claims for User to retrieve.
 func RequireAuth(cfg sharedauth.Config) fiber.Handler {
-	return middleware(cfg, true)
-}
-
-// OptionalAuth verifies the Bearer token if one is present, but lets the
-// request through either way. Handlers should use TryUser to check.
-func OptionalAuth(cfg sharedauth.Config) fiber.Handler {
-	return middleware(cfg, false)
-}
-
-// middleware is the single implementation behind RequireAuth/OptionalAuth —
-// they differ only in what happens when no token is present.
-func middleware(cfg sharedauth.Config, required bool) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		token := bearerToken(c)
-		if token == "" {
-			if required {
-				return unauthorized(c, "no token provided")
-			}
-			return c.Next()
-		}
-
-		claims, err := sharedauth.VerifyToken(cfg, token)
+		claims, err := claimsFromRequest(c, cfg)
 		if err != nil {
-			return unauthorized(c, "invalid token")
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 		}
-
-		c.Locals(ctxUserKey, claims)
+		c.Locals(localsKey, claims)
 		return c.Next()
 	}
 }
 
-// User returns the authenticated claims set by RequireAuth/OptionalAuth. It
-// panics if called on a route not behind one of those middlewares.
-func User(c *fiber.Ctx) *sharedauth.Claims {
-	claims, ok := TryUser(c)
-	if !ok {
-		panic("auth: no authenticated user in context")
+// OptionalAuth attaches claims when a valid Bearer token is present, but
+// lets the request through either way if no token was sent. A malformed
+// or expired token is still rejected. Use User(c) to check whether the
+// caller ended up authenticated.
+func OptionalAuth(cfg sharedauth.Config) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if c.Get("Authorization") == "" {
+			return c.Next()
+		}
+		claims, err := claimsFromRequest(c, cfg)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+		}
+		c.Locals(localsKey, claims)
+		return c.Next()
 	}
-	return claims
 }
 
-// TryUser returns the authenticated claims, if any, without panicking.
-func TryUser(c *fiber.Ctx) (*sharedauth.Claims, bool) {
-	claims, ok := c.Locals(ctxUserKey).(*sharedauth.Claims)
+func claimsFromRequest(c *fiber.Ctx, cfg sharedauth.Config) (*sharedauth.Claims, error) {
+	token := strings.TrimPrefix(c.Get("Authorization"), "Bearer ")
+	if token == "" {
+		return nil, sharedauth.ErrInvalidToken
+	}
+	return sharedauth.VerifyToken(cfg, token)
+}
+
+// User returns the authenticated caller's claims. ok is false when
+// RequireAuth/OptionalAuth wasn't applied to this route, or OptionalAuth
+// let an unauthenticated request through.
+func User(c *fiber.Ctx) (*sharedauth.Claims, bool) {
+	claims, ok := c.Locals(localsKey).(*sharedauth.Claims)
 	return claims, ok
-}
-
-func bearerToken(c *fiber.Ctx) string {
-	header := c.Get("Authorization")
-	if header == "" {
-		return ""
-	}
-	return strings.TrimPrefix(header, "Bearer ")
-}
-
-func unauthorized(c *fiber.Ctx, reason string) error {
-	return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"message": "unauthorized: " + reason})
 }
