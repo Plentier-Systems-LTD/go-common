@@ -1,8 +1,3 @@
-// Package billing verifies Apple App Store and Google Play purchase
-// receipts/tokens and parses their server-to-server webhook notifications.
-// It is intentionally storage-agnostic: verification returns a
-// PurchaseResult, and persisting subscription/transaction state is left to
-// each consuming service's own database.
 package billing
 
 import (
