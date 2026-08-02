@@ -32,6 +32,9 @@ func (s *Service) VerifyAndProcessPurchase(ctx context.Context, userID string, p
 	default:
 		return nil, fmt.Errorf("billing: unknown provider %q", provider)
 	}
+	if p == nil {
+		return nil, fmt.Errorf("billing: provider %q is not configured", provider)
+	}
 
 	req.UserID = userID
 
