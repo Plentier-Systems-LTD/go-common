@@ -41,13 +41,9 @@ func New(ctx context.Context, region, accessKeyID, secretAccessKey, bucket strin
 }
 
 // Put uploads data under key with SSE-S3 encryption and returns its S3
-// URL, setting a cache-forever Cache-Control header. This is only safe
-// because it's the caller's responsibility to write each object under a
-// fresh, never-reused key (e.g. a UUID) — Put never overwrites an existing
-// key in place, so the object at a given URL never changes after it's
-// written, and every client (browsers, CDNs, mobile image caches) can
-// therefore treat it as immutable instead of re-fetching or revalidating
-// on every load.
+// URL, setting a cache-forever Cache-Control header. Safe only when the
+// caller writes each object under a fresh, never-reused key (e.g. a
+// UUID) — Put never overwrites an existing key in place.
 func (c *Client) Put(ctx context.Context, key, contentType string, data []byte) (string, error) {
 	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:               aws.String(c.bucket),

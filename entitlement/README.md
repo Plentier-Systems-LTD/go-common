@@ -15,9 +15,10 @@ go get github.com/Plentier-Systems-LTD/go-common@latest
   `"chat"`) and how many free lifetime uses each gets.
 - **`Counter`** — the interface a project implements once, switching on `Kind` to call its own
   per-feature count queries (how many documents/messages/etc. has this user ever used).
-- **`ActiveSubscription`** — reads `billing.Subscription` directly for the plan/expiry detail a
-  client-facing status endpoint typically needs, complementing `Service.IsSubscribed`'s plain bool.
 - **`fiber/entitlement.RequireEntitlement`** / **`RequireSubscription`** — the Fiber middleware.
+- **[`gorm/entitlement.ActiveSubscription`](../gorm/entitlement)** — reads `billing.Subscription`
+  directly for the plan/expiry detail a client-facing status endpoint typically needs,
+  complementing `Service.IsSubscribed`'s plain bool.
 
 ## Example
 

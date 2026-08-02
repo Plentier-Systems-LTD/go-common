@@ -1,9 +1,12 @@
+// Package billing provides Fiber middleware on top of go-common/billing.
 package billing
 
 import (
 	"github.com/gofiber/fiber/v2"
 
+	sharedbilling "github.com/Plentier-Systems-LTD/go-common/billing"
 	fiberauth "github.com/Plentier-Systems-LTD/go-common/fiber/auth"
+	"github.com/Plentier-Systems-LTD/go-common/fiber/httpx"
 )
 
 // PremiumProtected gates a route behind "has an active, unexpired
@@ -13,26 +16,20 @@ import (
 // For free-tier/lifetime-allowance gating (subscribed OR hasn't used up a
 // free quota), use go-common/fiber/entitlement instead — this middleware
 // only covers the simpler "subscription required, no free tier" case.
-func PremiumProtected(svc *Service) fiber.Handler {
+func PremiumProtected(svc *sharedbilling.Service) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		claims, ok := fiberauth.User(c)
 		if !ok {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"message": "Authentication required",
-			})
+			return httpx.SendError(c, fiber.StatusUnauthorized, "Authentication required")
 		}
 
 		isSubscribed, err := svc.IsSubscribed(c.UserContext(), claims.UserID)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"message": "Failed to verify your subscription standing",
-			})
+			return httpx.SendError(c, fiber.StatusInternalServerError, "Failed to verify your subscription standing")
 		}
 
 		if !isSubscribed {
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"message": "Premium subscription required to access this resource",
-			})
+			return httpx.SendError(c, fiber.StatusForbidden, "Premium subscription required to access this resource")
 		}
 
 		return c.Next()

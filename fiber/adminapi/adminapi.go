@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 
 	sharedadminapi "github.com/Plentier-Systems-LTD/go-common/adminapi"
+	"github.com/Plentier-Systems-LTD/go-common/fiber/httpx"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -20,7 +21,7 @@ func RequireAPIKey(key string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		got := c.Get(apiKeyHeader)
 		if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(key)) != 1 {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+			return httpx.SendError(c, fiber.StatusUnauthorized, "unauthorized")
 		}
 		return c.Next()
 	}
@@ -34,7 +35,7 @@ func Mount(router fiber.Router, provider sharedadminapi.Provider, apiKey string)
 	group.Get("/stats", func(c *fiber.Ctx) error {
 		stats, err := provider.PlatformStats(c.UserContext())
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load stats"})
+			return httpx.SendError(c, fiber.StatusInternalServerError, "failed to load stats")
 		}
 		return c.JSON(stats)
 	})
@@ -46,7 +47,7 @@ func Mount(router fiber.Router, provider sharedadminapi.Provider, apiKey string)
 
 		users, err := provider.ListUsers(c.UserContext(), page, limit, search)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load users"})
+			return httpx.SendError(c, fiber.StatusInternalServerError, "failed to load users")
 		}
 		return c.JSON(users)
 	})

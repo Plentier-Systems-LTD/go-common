@@ -34,17 +34,8 @@ type InitResult struct {
 }
 
 // Initialize auto-migrates the billing schema and builds a Service/Handler
-// pair. Apple and Google are each independently optional: leaving a
-// provider's credentials unset disables that provider (Service.
-// VerifyAndProcessPurchase returns an error for it, and MountWebhooks
-// skips its webhook route) rather than failing Initialize — the billing
-// tables and the tables' free-tier entitlement reads still need to exist
-// even in an environment where purchase verification itself isn't
-// configured yet (e.g. local dev).
-//
-// A provider whose credentials are set but invalid (e.g. an unparsable
-// root CA) is still a hard error, since that's a genuine misconfiguration
-// rather than "not configured".
+// pair; see InitResult and Config for which providers end up enabled.
+// Credentials that are set but invalid are still a hard error.
 func Initialize(db *gorm.DB, cfg Config) (*InitResult, error) {
 	if err := db.AutoMigrate(&BillingPlan{}, &Subscription{}, &Transaction{}); err != nil {
 		return nil, fmt.Errorf("billing: failed to auto-migrate schema: %w", err)

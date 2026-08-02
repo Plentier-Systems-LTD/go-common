@@ -4,11 +4,14 @@
 package entitlement
 
 import (
+	"context"
+
 	"github.com/gofiber/fiber/v2"
 
 	sharedbilling "github.com/Plentier-Systems-LTD/go-common/billing"
 	sharedentitlement "github.com/Plentier-Systems-LTD/go-common/entitlement"
 	fiberauth "github.com/Plentier-Systems-LTD/go-common/fiber/auth"
+	"github.com/Plentier-Systems-LTD/go-common/fiber/httpx"
 )
 
 // RequireEntitlement gates a route behind "has an active subscription OR
@@ -24,20 +27,18 @@ func RequireEntitlement(billingSvc *sharedbilling.Service, limits sharedentitlem
 	return func(c *fiber.Ctx) error {
 		claims, _ := fiberauth.User(c)
 
-		if billingSvc != nil {
-			subscribed, err := billingSvc.IsSubscribed(c.UserContext(), claims.UserID)
-			if err != nil {
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "failed to verify subscription status"})
-			}
-			if subscribed {
-				return c.Next()
-			}
+		subscribed, err := isSubscribed(c.UserContext(), billingSvc, claims.UserID)
+		if err != nil {
+			return httpx.SendError(c, fiber.StatusInternalServerError, "failed to verify subscription status")
+		}
+		if subscribed {
+			return c.Next()
 		}
 
 		limit := limits[kind]
 		used, err := counter.Count(c.UserContext(), kind, claims.UserID)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "failed to verify usage"})
+			return httpx.SendError(c, fiber.StatusInternalServerError, "failed to verify usage")
 		}
 
 		if int(used) >= limit {
@@ -55,13 +56,9 @@ func RequireSubscription(billingSvc *sharedbilling.Service, message fiber.Map) f
 	return func(c *fiber.Ctx) error {
 		claims, _ := fiberauth.User(c)
 
-		var subscribed bool
-		if billingSvc != nil {
-			var err error
-			subscribed, err = billingSvc.IsSubscribed(c.UserContext(), claims.UserID)
-			if err != nil {
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "failed to verify subscription status"})
-			}
+		subscribed, err := isSubscribed(c.UserContext(), billingSvc, claims.UserID)
+		if err != nil {
+			return httpx.SendError(c, fiber.StatusInternalServerError, "failed to verify subscription status")
 		}
 		if !subscribed {
 			return c.Status(fiber.StatusPaymentRequired).JSON(message)
@@ -69,4 +66,13 @@ func RequireSubscription(billingSvc *sharedbilling.Service, message fiber.Map) f
 
 		return c.Next()
 	}
+}
+
+// isSubscribed treats a nil billingSvc as "never subscribed" so callers
+// don't each need their own nil guard around IsSubscribed.
+func isSubscribed(ctx context.Context, billingSvc *sharedbilling.Service, userID string) (bool, error) {
+	if billingSvc == nil {
+		return false, nil
+	}
+	return billingSvc.IsSubscribed(ctx, userID)
 }

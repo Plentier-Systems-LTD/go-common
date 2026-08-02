@@ -24,6 +24,7 @@ go-common/
 ├── voice/           OpenAI Whisper audio transcription
 ├── fiber/
 │   ├── auth/        Fiber middleware wrapping auth (RequireAuth, OptionalAuth, User)
+│   ├── billing/     Fiber middleware wrapping billing (PremiumProtected)
 │   ├── entitlement/ Fiber middleware wrapping entitlement (RequireEntitlement, RequireSubscription)
 │   ├── adminapi/    Mounts adminapi's contract as Fiber routes (RequireAPIKey, Mount)
 │   ├── httpx/       Tiny shared response helpers (SendError)
@@ -31,6 +32,7 @@ go-common/
 │   └── cors/        Fiber CORS middleware
 └── gorm/
     ├── auth/        GORM UserStore + Bootstrap (wires Service, Google/Apple, SMTP verification)
+    ├── entitlement/ GORM-backed ActiveSubscription lookup
     ├── push/        GORM device-token store for push
     └── postgres/    Opens the shared sqlr/GORM Postgres connection
 ```

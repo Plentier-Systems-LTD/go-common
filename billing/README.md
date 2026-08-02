@@ -18,9 +18,9 @@ go get github.com/Plentier-Systems-LTD/go-common@latest
   `IsSubscribed`, and maps an `OriginalTransactionID` back to a `UserID` for webhooks that don't
   carry the user's ID.
 - **`Handler`** — Fiber handlers for the two webhook endpoints (`AppleWebhook`, `GoogleWebhook`).
-- **`PremiumProtected`** — Fiber middleware gate for subscriber-only routes. For free-tier/
-  lifetime-allowance gating instead of a hard subscription requirement, see
-  [`fiber/entitlement`](../fiber/entitlement).
+- **[`fiber/billing.PremiumProtected`](../fiber/billing)** — Fiber middleware gate for
+  subscriber-only routes. For free-tier/lifetime-allowance gating instead of a hard subscription
+  requirement, see [`fiber/entitlement`](../fiber/entitlement).
 - **`Initialize`** — auto-migrates the billing tables and wires a `Service`/`Handler` pair in one
   call. Apple and Google are each independently optional — leaving a provider's credentials unset
   disables just that provider (`InitResult.AppleEnabled`/`GoogleEnabled`) rather than failing
@@ -116,7 +116,9 @@ func VerifyPurchase(svc *billing.Service) fiber.Handler {
 ### Gating a route behind an active subscription
 
 ```go
-premium := v1.Group("", billing.PremiumProtected(billingSvc))
+import fiberbilling "github.com/Plentier-Systems-LTD/go-common/fiber/billing"
+
+premium := v1.Group("", fiberbilling.PremiumProtected(billingSvc))
 premium.Get("/premium-feature", handlers.PremiumFeature)
 ```
 
