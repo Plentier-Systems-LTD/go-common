@@ -11,12 +11,13 @@ go get github.com/Plentier-Systems-LTD/go-common@latest
 
 ## What's in here
 
-- **`PlatformStats`** / **`UserSummary`** / **`UserPage`** — the wire types the dashboard reads.
-- **`Provider`** — the interface a platform implements: `PlatformStats(ctx)` and
-  `ListUsers(ctx, page, limit, search)`. Two methods, deliberately small.
-- **`fiber/adminapi.Mount`** — registers `GET /internal/stats` and `GET /internal/users` behind
-  `RequireAPIKey`, given a `Provider`. "Import package, register route" is the entire integration
-  surface a platform needs.
+- **`PlatformStats`** / **`UserSummary`** / **`UserPage`** / **`TrendPoint`** — the wire types the
+  dashboard reads.
+- **`Provider`** — the interface a platform implements: `PlatformStats(ctx)`,
+  `ListUsers(ctx, page, limit, search)`, and `SignupTrend(ctx, days)`. Deliberately small.
+- **`fiber/adminapi.Mount`** — registers `GET /internal/stats`, `GET /internal/users`, and
+  `GET /internal/stats/trend` behind `RequireAPIKey`, given a `Provider`. "Import package,
+  register route" is the entire integration surface a platform needs.
 
 ## Example
 
@@ -33,6 +34,10 @@ func (Provider) PlatformStats(ctx context.Context) (adminapi.PlatformStats, erro
 
 func (Provider) ListUsers(ctx context.Context, page, limit int, search string) (adminapi.UserPage, error) {
     // query models.User (+ left join billing.Subscription), ILIKE search on email/name
+}
+
+func (Provider) SignupTrend(ctx context.Context, days int) ([]adminapi.TrendPoint, error) {
+    // group models.User by day for the last `days` days, similarly for new Subscription rows
 }
 ```
 

@@ -47,10 +47,21 @@ type UserPage struct {
 	TotalCount int64         `json:"totalCount"`
 }
 
+// TrendPoint is one day's signup/conversion counts, part of a series
+// returned oldest-first.
+type TrendPoint struct {
+	Date             string `json:"date"` // YYYY-MM-DD, UTC
+	NewUsers         int64  `json:"newUsers"`
+	NewSubscriptions int64  `json:"newSubscriptions"`
+}
+
 // Provider is what a platform implements to expose itself to the
-// dashboard. Two methods, deliberately small — a platform's own queries
-// stay in the platform; this only adapts them into the wire shape above.
+// dashboard. Deliberately small — a platform's own queries stay in the
+// platform; this only adapts them into the wire shape above.
 type Provider interface {
 	PlatformStats(ctx context.Context) (PlatformStats, error)
 	ListUsers(ctx context.Context, page, limit int, search string) (UserPage, error)
+	// SignupTrend returns one TrendPoint per day for the last days days
+	// (oldest first), for charting signups/conversions over time.
+	SignupTrend(ctx context.Context, days int) ([]TrendPoint, error)
 }

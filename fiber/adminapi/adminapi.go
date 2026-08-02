@@ -27,8 +27,8 @@ func RequireAPIKey(key string) fiber.Handler {
 	}
 }
 
-// Mount registers GET /internal/stats and GET /internal/users on router,
-// both behind RequireAPIKey(apiKey).
+// Mount registers GET /internal/stats, GET /internal/users, and
+// GET /internal/stats/trend on router, all behind RequireAPIKey(apiKey).
 func Mount(router fiber.Router, provider sharedadminapi.Provider, apiKey string) {
 	group := router.Group("/internal", RequireAPIKey(apiKey))
 
@@ -50,5 +50,18 @@ func Mount(router fiber.Router, provider sharedadminapi.Provider, apiKey string)
 			return httpx.SendError(c, fiber.StatusInternalServerError, "failed to load users")
 		}
 		return c.JSON(users)
+	})
+
+	group.Get("/stats/trend", func(c *fiber.Ctx) error {
+		days := c.QueryInt("days", 30)
+		if days < 1 || days > 90 {
+			days = 30
+		}
+
+		trend, err := provider.SignupTrend(c.UserContext(), days)
+		if err != nil {
+			return httpx.SendError(c, fiber.StatusInternalServerError, "failed to load trend")
+		}
+		return c.JSON(trend)
 	})
 }
