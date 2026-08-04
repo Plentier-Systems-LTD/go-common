@@ -29,6 +29,7 @@ type UserSummary struct {
 	ID            string     `json:"id"`
 	Email         string     `json:"email"`
 	FullName      string     `json:"fullName,omitempty"`
+	AvatarURL     *string    `json:"avatarUrl,omitempty"`
 	Provider      string     `json:"provider"`
 	EmailVerified bool       `json:"emailVerified"`
 	CreatedAt     time.Time  `json:"createdAt"`
