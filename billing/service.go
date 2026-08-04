@@ -32,6 +32,9 @@ func (s *Service) VerifyAndProcessPurchase(ctx context.Context, userID string, p
 	default:
 		return nil, fmt.Errorf("billing: unknown provider %q", provider)
 	}
+	if p == nil {
+		return nil, fmt.Errorf("billing: provider %q is not configured", provider)
+	}
 
 	req.UserID = userID
 
@@ -116,10 +119,16 @@ func (s *Service) FindUserIDByOriginalTransactionID(ctx context.Context, origina
 
 func (s *Service) IsSubscribed(ctx context.Context, userID string) (bool, error) {
 	var count int64
-	err := s.db.WithContext(ctx).
-		Model(&Subscription{}).
-		Where("user_id = ? AND status = ? AND expires_at > ?", userID, StatusActive, time.Now()).
-		Count(&count).Error
-
+	err := ActiveSubscriptionQuery(s.db.WithContext(ctx), userID).Count(&count).Error
 	return count > 0, err
+}
+
+// ActiveSubscriptionQuery scopes db to userID's active, unexpired
+// subscriptions, most-recent-first — the one place "what counts as
+// active" is defined, so IsSubscribed and gorm/entitlement.ActiveSubscription
+// can't drift out of sync.
+func ActiveSubscriptionQuery(db *gorm.DB, userID string) *gorm.DB {
+	return db.Model(&Subscription{}).
+		Where("user_id = ? AND status = ? AND expires_at > ?", userID, StatusActive, time.Now()).
+		Order("expires_at DESC")
 }

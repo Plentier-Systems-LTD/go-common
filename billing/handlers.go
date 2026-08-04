@@ -34,6 +34,10 @@ type WebhookErrorResponse struct {
 //	@Failure		500		{object}	WebhookErrorResponse	"Failed to process notification"
 //	@Router			/billing/webhooks/apple [post]
 func (h *Handler) AppleWebhook(c *fiber.Ctx) error {
+	if h.apple == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "apple billing is not configured"})
+	}
+
 	payload := c.Body()
 	ctx := c.UserContext()
 
@@ -74,6 +78,10 @@ func (h *Handler) AppleWebhook(c *fiber.Ctx) error {
 //	@Failure		500		{object}	WebhookErrorResponse	"Failed to process notification"
 //	@Router			/billing/webhooks/google [post]
 func (h *Handler) GoogleWebhook(c *fiber.Ctx) error {
+	if h.google == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "google billing is not configured"})
+	}
+
 	payload := c.Body()
 
 	ctx := WithGoogleAuthHeader(c.UserContext(), c.Get("Authorization"))

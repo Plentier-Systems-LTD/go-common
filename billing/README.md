@@ -18,8 +18,16 @@ go get github.com/Plentier-Systems-LTD/go-common@latest
   `IsSubscribed`, and maps an `OriginalTransactionID` back to a `UserID` for webhooks that don't
   carry the user's ID.
 - **`Handler`** — Fiber handlers for the two webhook endpoints (`AppleWebhook`, `GoogleWebhook`).
-- **`PremiumProtected`** — Fiber middleware gate for subscriber-only routes.
-- **`Initialize`** — wires all of the above and auto-migrates the billing tables in one call.
+- **[`fiber/billing.PremiumProtected`](../fiber/billing)** — Fiber middleware gate for
+  subscriber-only routes. For free-tier/lifetime-allowance gating instead of a hard subscription
+  requirement, see [`fiber/entitlement`](../fiber/entitlement).
+- **`Initialize`** — auto-migrates the billing tables and wires a `Service`/`Handler` pair in one
+  call. Apple and Google are each independently optional — leaving a provider's credentials unset
+  disables just that provider (`InitResult.AppleEnabled`/`GoogleEnabled`) rather than failing
+  `Initialize`, since the billing tables (and the free-tier entitlement reads that depend on them)
+  still need to exist even when purchase verification itself isn't configured yet.
+- **`InitResult.MountWebhooks`** — registers each *enabled* provider's webhook route on a router
+  you choose the path/group for.
 
 ## Full example
 
@@ -48,7 +56,7 @@ func main() {
         log.Fatal(err)
     }
 
-    billingSvc, err := billing.Initialize(app, db, billing.Config{
+    result, err := billing.Initialize(db, billing.Config{
         AppleSharedSecret: os.Getenv("APPLE_SHARED_SECRET"),
         AppleRootCAPEM:    rootCA,
 
@@ -60,11 +68,12 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    // Initialize already registered:
+    result.MountWebhooks(app.Group("/api/v1/billing/webhooks"))
+    // Mounted (only for whichever provider was actually configured):
     //   POST /api/v1/billing/webhooks/apple
     //   POST /api/v1/billing/webhooks/google
 
-    registerRoutes(app, billingSvc)
+    registerRoutes(app, result.Service)
     log.Fatal(app.Listen(":8080"))
 }
 ```
@@ -107,7 +116,9 @@ func VerifyPurchase(svc *billing.Service) fiber.Handler {
 ### Gating a route behind an active subscription
 
 ```go
-premium := v1.Group("", billing.PremiumProtected(billingSvc))
+import fiberbilling "github.com/Plentier-Systems-LTD/go-common/fiber/billing"
+
+premium := v1.Group("", fiberbilling.PremiumProtected(billingSvc))
 premium.Get("/premium-feature", handlers.PremiumFeature)
 ```
 
