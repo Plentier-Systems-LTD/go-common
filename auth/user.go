@@ -29,6 +29,8 @@ type User interface {
 	SetProvider(provider Provider, providerID string)
 	IsEmailVerified() bool
 	SetEmailVerified(verified bool)
+	GetLastLoginAt() *time.Time
+	SetLastLoginAt(t time.Time)
 }
 
 // BaseUser holds the fields every project needs for authentication.
@@ -40,14 +42,15 @@ type User interface {
 //	    LastName  string
 //	}
 type BaseUser struct {
-	ID            string    `gorm:"primaryKey" json:"id"`
-	Email         string    `gorm:"uniqueIndex;not null" json:"email"`
-	PasswordHash  string    `gorm:"column:password_hash" json:"-"`
-	Provider      Provider  `gorm:"not null;default:password" json:"provider"`
-	ProviderID    string    `gorm:"index" json:"-"`
-	EmailVerified bool      `gorm:"not null;default:false" json:"emailVerified"`
-	CreatedAt     time.Time `gorm:"autoCreateTime" json:"createdAt"`
-	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
+	ID            string     `gorm:"primaryKey" json:"id"`
+	Email         string     `gorm:"uniqueIndex;not null" json:"email"`
+	PasswordHash  string     `gorm:"column:password_hash" json:"-"`
+	Provider      Provider   `gorm:"not null;default:password" json:"provider"`
+	ProviderID    string     `gorm:"index" json:"-"`
+	EmailVerified bool       `gorm:"not null;default:false" json:"emailVerified"`
+	LastLoginAt   *time.Time `json:"lastLoginAt,omitempty"`
+	CreatedAt     time.Time  `gorm:"autoCreateTime" json:"createdAt"`
+	UpdatedAt     time.Time  `gorm:"autoUpdateTime" json:"updatedAt"`
 }
 
 // NewBaseUser builds a BaseUser ready for password registration: a fresh
@@ -98,4 +101,12 @@ func (u *BaseUser) IsEmailVerified() bool {
 
 func (u *BaseUser) SetEmailVerified(verified bool) {
 	u.EmailVerified = verified
+}
+
+func (u *BaseUser) GetLastLoginAt() *time.Time {
+	return u.LastLoginAt
+}
+
+func (u *BaseUser) SetLastLoginAt(t time.Time) {
+	u.LastLoginAt = &t
 }

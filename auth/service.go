@@ -111,6 +111,7 @@ func (s *Service[T]) Register(ctx context.Context, user T, password string) (T, 
 	}
 	user.SetPasswordHash(hash)
 	user.SetProvider(ProviderPassword, "")
+	user.SetLastLoginAt(time.Now())
 
 	if err := s.store.Create(ctx, user); err != nil {
 		return zero, nil, fmt.Errorf("auth: failed to create user: %w", err)
@@ -134,6 +135,11 @@ func (s *Service[T]) Login(ctx context.Context, email, password string) (T, *Tok
 
 	if err := s.hasher.Compare(user.GetPasswordHash(), password); err != nil {
 		return zero, nil, ErrInvalidCredentials
+	}
+
+	user.SetLastLoginAt(time.Now())
+	if err := s.store.Update(ctx, user); err != nil {
+		return zero, nil, fmt.Errorf("auth: failed to record login: %w", err)
 	}
 
 	tokens, err := GenerateTokenPair(s.cfg, user.GetID(), user.GetEmail())
@@ -164,6 +170,10 @@ func (s *Service[T]) OAuthLogin(ctx context.Context, provider Provider, idToken 
 	}
 
 	if user, err := s.store.FindByProvider(ctx, provider, identity.ProviderID); err == nil {
+		user.SetLastLoginAt(time.Now())
+		if err := s.store.Update(ctx, user); err != nil {
+			return zero, nil, false, fmt.Errorf("auth: failed to record login: %w", err)
+		}
 		tokens, err := GenerateTokenPair(s.cfg, user.GetID(), user.GetEmail())
 		return user, tokens, false, err
 	} else if !errors.Is(err, ErrUserNotFound) {
@@ -173,6 +183,7 @@ func (s *Service[T]) OAuthLogin(ctx context.Context, provider Provider, idToken 
 	if identity.Email != "" {
 		if existing, err := s.store.FindByEmail(ctx, NormalizeEmail(identity.Email)); err == nil {
 			existing.SetProvider(provider, identity.ProviderID)
+			existing.SetLastLoginAt(time.Now())
 			if err := s.store.Update(ctx, existing); err != nil {
 				return zero, nil, false, fmt.Errorf("auth: failed to link provider to existing user: %w", err)
 			}
@@ -184,6 +195,7 @@ func (s *Service[T]) OAuthLogin(ctx context.Context, provider Provider, idToken 
 	user := newUser(*identity)
 	user.SetProvider(provider, identity.ProviderID)
 	user.SetEmailVerified(identity.EmailVerified)
+	user.SetLastLoginAt(time.Now())
 
 	if err := s.store.Create(ctx, user); err != nil {
 		return zero, nil, false, fmt.Errorf("auth: failed to create user: %w", err)
