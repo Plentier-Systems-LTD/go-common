@@ -52,12 +52,18 @@ func (s *Service) VerifyAndProcessPurchase(ctx context.Context, userID string, p
 
 func (s *Service) ProcessPurchaseResult(ctx context.Context, userID string, provider string, res *PurchaseResult, event string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Tracks whether this exact transaction event was already logged
+		// (e.g. the client's verify call and the async webhook both
+		// reporting the same event) — that only skips the duplicate log
+		// insert below, not the subscription update, since a repeat
+		// transaction_id (a plain restore, or StoreKit returning the
+		// existing entitlement instead of a new charge) is also the only
+		// way a different app account than the one on file re-verifies
+		// the same purchase, and that reassignment must still happen.
 		var existing Transaction
 		err := tx.Where("transaction_id = ?", res.TransactionID).First(&existing).Error
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
+		alreadyLogged := err == nil
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
 
@@ -74,6 +80,16 @@ func (s *Service) ProcessPurchaseResult(ctx context.Context, userID string, prov
 			}
 		} else if err != nil {
 			return err
+		} else {
+			// A different app account than the one currently on file just
+			// verified this same underlying subscription (e.g. bought or
+			// restored it while signed into a different account than
+			// whichever one verified it first) — the most recent verifier
+			// is who should hold entitlement. Webhook-driven calls always
+			// pass the existing owner's ID here already (see
+			// handlers.go's FindUserIDByOriginalTransactionID fallback),
+			// so this is a no-op reassignment for them.
+			sub.UserID = userID
 		}
 
 		// 2. Update status based on expiration and event type
@@ -88,6 +104,10 @@ func (s *Service) ProcessPurchaseResult(ctx context.Context, userID string, prov
 
 		if err := tx.Save(&sub).Error; err != nil {
 			return err
+		}
+
+		if alreadyLogged {
+			return nil
 		}
 
 		// 3. Log historical transaction record
