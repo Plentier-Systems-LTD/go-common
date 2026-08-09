@@ -31,6 +31,11 @@ type BillingPlan struct {
 	ID   string          `gorm:"primaryKey"`
 	Name string          `gorm:"not null"`
 	Type BillingPlanType `gorm:"not null"`
+
+	// PriceUSDCents is this plan's price in US cents, set by whoever
+	// configures the plan. Zero means "not priced" — such a plan simply
+	// contributes nothing to ActiveRevenueUSDCents, rather than erroring.
+	PriceUSDCents int64 `gorm:"default:0"`
 }
 
 type Subscription struct {

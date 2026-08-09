@@ -148,7 +148,25 @@ func (s *Service) IsSubscribed(ctx context.Context, userID string) (bool, error)
 // active" is defined, so IsSubscribed and gorm/entitlement.ActiveSubscription
 // can't drift out of sync.
 func ActiveSubscriptionQuery(db *gorm.DB, userID string) *gorm.DB {
-	return db.Model(&Subscription{}).
-		Where("user_id = ? AND status = ? AND expires_at > ?", userID, StatusActive, time.Now()).
-		Order("expires_at DESC")
+	return activeSubscriptionsQuery(db).Where("user_id = ?", userID).Order("expires_at DESC")
+}
+
+// activeSubscriptionsQuery is ActiveSubscriptionQuery's all-accounts
+// counterpart — same "what counts as active" predicate, unscoped by user,
+// for aggregate reporting like ActiveRevenueUSDCents.
+func activeSubscriptionsQuery(db *gorm.DB) *gorm.DB {
+	return db.Model(&Subscription{}).Where("status = ? AND expires_at > ?", StatusActive, time.Now())
+}
+
+// ActiveRevenueUSDCents sums PriceUSDCents across every plan with a
+// currently active, unexpired subscription — a live recurring-revenue
+// estimate (MRR), not a substitute for real accounting: it reflects what's
+// active right now, not what was actually charged historically.
+func ActiveRevenueUSDCents(ctx context.Context, db *gorm.DB) (int64, error) {
+	var totalCents int64
+	err := activeSubscriptionsQuery(db.WithContext(ctx)).
+		Joins("JOIN billing_plans ON billing_plans.id = subscriptions.plan_id").
+		Select("COALESCE(SUM(billing_plans.price_usd_cents), 0)").
+		Scan(&totalCents).Error
+	return totalCents, err
 }

@@ -20,6 +20,11 @@ type PlatformStats struct {
 	NewUsersLast30d int64     `json:"newUsersLast30d"`
 	SubscribedCount int64     `json:"subscribedCount"`
 	GeneratedAt     time.Time `json:"generatedAt"`
+
+	// SubscriptionRevenueUSDCents is billing.ActiveRevenueUSDCents at
+	// GeneratedAt — current recurring revenue, in US cents. Zero for a
+	// Provider that doesn't wire up billing.
+	SubscriptionRevenueUSDCents int64 `json:"subscriptionRevenueUsdCents"`
 }
 
 // UserSummary is one user as reported to the dashboard — not a platform's
