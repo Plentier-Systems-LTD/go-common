@@ -25,6 +25,26 @@ type PlatformStats struct {
 	// GeneratedAt — current recurring revenue, in US cents. Zero for a
 	// Provider that doesn't wire up billing.
 	SubscriptionRevenueUSDCents int64 `json:"subscriptionRevenueUsdCents"`
+
+	// ChurnedLast30d counts billing.Subscription rows with Status
+	// Canceled or Expired whose UpdatedAt falls in the last 30 days.
+	// billing.Service always Saves a Subscription on every status
+	// transition, so UpdatedAt is a reasonable (not perfectly exact)
+	// proxy for "when this subscription stopped being active." Zero for
+	// a Provider that doesn't wire up billing.
+	ChurnedLast30d int64 `json:"churnedLast30d"`
+
+	// FilesUploadedTotal/AIAnalysesTotal/AIChatMessagesTotal are
+	// aggregate, non-PII engagement counts — how much a platform's AI
+	// features actually get used, not who used them. Each is 0 for a
+	// platform that doesn't have that particular feature (e.g. a platform
+	// with no chat has AIChatMessagesTotal always 0); a platform whose
+	// single feature is simultaneously an upload and an AI call (like a
+	// scan-and-extract flow) may legitimately report the same count for
+	// FilesUploadedTotal and AIAnalysesTotal.
+	FilesUploadedTotal  int64 `json:"filesUploadedTotal"`
+	AIAnalysesTotal     int64 `json:"aiAnalysesTotal"`
+	AIChatMessagesTotal int64 `json:"aiChatMessagesTotal"`
 }
 
 // UserSummary is one user as reported to the dashboard — not a platform's
@@ -53,12 +73,17 @@ type UserPage struct {
 	TotalCount int64         `json:"totalCount"`
 }
 
-// TrendPoint is one day's signup/conversion counts, part of a series
-// returned oldest-first.
+// TrendPoint is one day's signup/conversion/engagement counts, part of a
+// series returned oldest-first. FilesUploaded/AIAnalyses/AIChatMessages
+// mirror PlatformStats's same-named *Total fields — see there for what
+// each means and when it's legitimately 0.
 type TrendPoint struct {
 	Date             string `json:"date"` // YYYY-MM-DD, UTC
 	NewUsers         int64  `json:"newUsers"`
 	NewSubscriptions int64  `json:"newSubscriptions"`
+	FilesUploaded    int64  `json:"filesUploaded"`
+	AIAnalyses       int64  `json:"aiAnalyses"`
+	AIChatMessages   int64  `json:"aiChatMessages"`
 }
 
 // Provider is what a platform implements to expose itself to the
