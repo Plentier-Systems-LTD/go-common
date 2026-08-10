@@ -71,3 +71,27 @@ type Provider interface {
 	// (oldest first), for charting signups/conversions over time.
 	SignupTrend(ctx context.Context, days int) ([]TrendPoint, error)
 }
+
+// UserPatch is a partial update to one user, as requested by the
+// dashboard — nil fields are left unchanged. Deliberately excludes plan
+// status/expiry: those are derived from a platform's own billing
+// subscriptions (Stripe/Apple/Google), so they're never writable through
+// this contract.
+type UserPatch struct {
+	Email         *string `json:"email,omitempty"`
+	FullName      *string `json:"fullName,omitempty"`
+	EmailVerified *bool   `json:"emailVerified,omitempty"`
+}
+
+// MutableProvider is the optional write half of Provider — a platform
+// implements it only if it wants the dashboard to be able to edit/delete
+// its users, not just list them. Kept separate from Provider (rather than
+// adding these methods to it directly) so existing read-only Providers
+// keep compiling unchanged; see fiber/adminapi.Mount, which mounts the
+// extra routes only when a Provider also satisfies this interface — the
+// same optional-interface pattern as http.Flusher.
+type MutableProvider interface {
+	Provider
+	UpdateUser(ctx context.Context, id string, patch UserPatch) (UserSummary, error)
+	DeleteUser(ctx context.Context, id string) error
+}

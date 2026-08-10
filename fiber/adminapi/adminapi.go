@@ -29,6 +29,10 @@ func RequireAPIKey(key string) fiber.Handler {
 
 // Mount registers GET /internal/stats, GET /internal/users, and
 // GET /internal/stats/trend on router, all behind RequireAPIKey(apiKey).
+// If provider also satisfies sharedadminapi.MutableProvider, it additionally
+// registers PATCH /internal/users/:id and DELETE /internal/users/:id —
+// omitted entirely for a read-only Provider, so those routes simply 404
+// rather than existing but always failing.
 func Mount(router fiber.Router, provider sharedadminapi.Provider, apiKey string) {
 	group := router.Group("/internal", RequireAPIKey(apiKey))
 
@@ -64,4 +68,26 @@ func Mount(router fiber.Router, provider sharedadminapi.Provider, apiKey string)
 		}
 		return c.JSON(trend)
 	})
+
+	if mutable, ok := provider.(sharedadminapi.MutableProvider); ok {
+		group.Patch("/users/:id", func(c *fiber.Ctx) error {
+			var patch sharedadminapi.UserPatch
+			if err := c.BodyParser(&patch); err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, "invalid request body")
+			}
+
+			user, err := mutable.UpdateUser(c.UserContext(), c.Params("id"), patch)
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusInternalServerError, "failed to update user")
+			}
+			return c.JSON(user)
+		})
+
+		group.Delete("/users/:id", func(c *fiber.Ctx) error {
+			if err := mutable.DeleteUser(c.UserContext(), c.Params("id")); err != nil {
+				return httpx.SendError(c, fiber.StatusInternalServerError, "failed to delete user")
+			}
+			return c.SendStatus(fiber.StatusNoContent)
+		})
+	}
 }

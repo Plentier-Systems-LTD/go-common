@@ -15,9 +15,16 @@ go get github.com/Plentier-Systems-LTD/go-common@latest
   dashboard reads.
 - **`Provider`** — the interface a platform implements: `PlatformStats(ctx)`,
   `ListUsers(ctx, page, limit, search)`, and `SignupTrend(ctx, days)`. Deliberately small.
+- **`MutableProvider`** — optional write half of `Provider`: `UpdateUser(ctx, id, UserPatch)` and
+  `DeleteUser(ctx, id)`. Implement it only if the platform wants the dashboard to be able to edit
+  or delete its users, not just list them — a plain `Provider` keeps compiling and working exactly
+  as before if you don't. `UserPatch` deliberately excludes plan status/expiry: those come from the
+  platform's own billing subscriptions, never from the dashboard.
 - **`fiber/adminapi.Mount`** — registers `GET /internal/stats`, `GET /internal/users`, and
   `GET /internal/stats/trend` behind `RequireAPIKey`, given a `Provider`. "Import package,
-  register route" is the entire integration surface a platform needs.
+  register route" is the entire integration surface a platform needs. If the `Provider` you pass
+  also satisfies `MutableProvider`, it additionally registers `PATCH /internal/users/:id` and
+  `DELETE /internal/users/:id`.
 
 ## Example
 
