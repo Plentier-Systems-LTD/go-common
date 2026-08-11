@@ -90,6 +90,14 @@ func (s *Service) ProcessPurchaseResult(ctx context.Context, userID string, prov
 			// handlers.go's FindUserIDByOriginalTransactionID fallback),
 			// so this is a no-op reassignment for them.
 			sub.UserID = userID
+			// Apple/Google keep the SAME original transaction ID when a
+			// user switches tiers within one subscription group (e.g.
+			// Monthly -> Annual is a plan change on the existing
+			// subscription, not a new one) — so this branch is also how a
+			// tier upgrade/downgrade is recorded. Without updating PlanID
+			// here too, an upgrade would verify successfully but silently
+			// keep the subscriber entitled under their old tier's PlanID.
+			sub.PlanID = res.ProductID
 		}
 
 		// 2. Update status based on expiration and event type
