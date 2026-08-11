@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// EmailBranding customizes the built-in HTML verification email.
+// EmailBranding customizes the built-in HTML code email template.
 // BrandName is the only customization most projects need — the footer's
 // copyright line always credits Plentier Systems regardless of
 // branding, since these templates ship as part of go-common.
@@ -34,23 +34,53 @@ func (b EmailBranding) withDefaults() EmailBranding {
 	return b
 }
 
-type verificationEmailData struct {
+// CodeEmailContent customizes the copy shown around the code box, letting
+// the same branded layout serve any code-driven flow — email
+// verification, a caregiver invite code, etc. — without duplicating the
+// template. Zero value renders as a verification-code email.
+type CodeEmailContent struct {
+	// Title is the large heading above the code box.
+	Title string
+	// Subtext is the smaller line below Title, above the code box.
+	Subtext string
+	// FooterNote replaces the default expiry/ignore note below the code
+	// box, if set.
+	FooterNote string
+}
+
+func (c CodeEmailContent) withDefaults() CodeEmailContent {
+	if c.Title == "" {
+		c.Title = "Verify your email"
+	}
+	if c.Subtext == "" {
+		c.Subtext = "Enter this code to confirm it's you."
+	}
+	if c.FooterNote == "" {
+		c.FooterNote = "This code expires shortly. If you didn't request it, you can safely ignore this email."
+	}
+	return c
+}
+
+type codeEmailData struct {
 	BrandName   string
 	LogoURL     string
 	AccentColor string
+	Title       string
+	Subtext     string
+	FooterNote  string
 	Code        string
 	Year        int
 }
 
-// verificationEmailTemplate is a table-based layout with inline styles —
-// the safest combination for rendering consistently across email clients
+// codeEmailTemplate is a table-based layout with inline styles — the
+// safest combination for rendering consistently across email clients
 // (Gmail, Apple Mail, Outlook), which strip <style> blocks and modern CSS.
-var verificationEmailTemplate = template.Must(template.New("verification").Parse(`<!doctype html>
+var codeEmailTemplate = template.Must(template.New("code-email").Parse(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{if .BrandName}}{{.BrandName}} {{end}}verification code</title>
+<title>{{if .BrandName}}{{.BrandName}} {{end}}{{.Title}}</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f4f4f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f7;padding:32px 16px;">
@@ -61,10 +91,10 @@ var verificationEmailTemplate = template.Must(template.New("verification").Parse
 <td style="padding:32px 32px 24px 32px;text-align:center;">
 {{if .LogoURL}}<img src="{{.LogoURL}}" alt="{{.BrandName}}" style="max-height:40px;margin-bottom:16px;">{{end}}
 {{if .BrandName}}<div style="font-size:18px;font-weight:600;color:#111827;margin-bottom:24px;">{{.BrandName}}</div>{{end}}
-<div style="font-size:20px;font-weight:600;color:#111827;margin-bottom:8px;">Verify your email</div>
-<div style="font-size:14px;color:#6b7280;margin-bottom:24px;">Enter this code to confirm it's you.</div>
+<div style="font-size:20px;font-weight:600;color:#111827;margin-bottom:8px;">{{.Title}}</div>
+<div style="font-size:14px;color:#6b7280;margin-bottom:24px;">{{.Subtext}}</div>
 <div style="display:inline-block;padding:16px 24px;background-color:#f9fafb;border-radius:8px;font-size:32px;font-weight:700;letter-spacing:8px;color:{{.AccentColor}};margin-bottom:24px;">{{.Code}}</div>
-<div style="font-size:13px;color:#9ca3af;">This code expires shortly. If you didn't request it, you can safely ignore this email.</div>
+<div style="font-size:13px;color:#9ca3af;">{{.FooterNote}}</div>
 </td>
 </tr>
 <tr>
@@ -80,24 +110,36 @@ var verificationEmailTemplate = template.Must(template.New("verification").Parse
 </html>
 `))
 
-// RenderVerificationEmailHTML renders the built-in branded HTML template
-// for a verification code. Use it directly, or pass NewBrandedHTMLBody's
+// RenderCodeEmailHTML renders the built-in branded HTML template for any
+// code-driven email. Use it directly, or pass NewBrandedCodeHTMLBody's
 // result as SMTPConfig.HTMLBody to wire it into SMTPSender.
-func RenderVerificationEmailHTML(branding EmailBranding, code string) (string, error) {
+func RenderCodeEmailHTML(branding EmailBranding, content CodeEmailContent, code string) (string, error) {
 	branding = branding.withDefaults()
+	content = content.withDefaults()
 
 	var buf bytes.Buffer
-	err := verificationEmailTemplate.Execute(&buf, verificationEmailData{
+	err := codeEmailTemplate.Execute(&buf, codeEmailData{
 		BrandName:   branding.BrandName,
 		LogoURL:     branding.LogoURL,
 		AccentColor: branding.AccentColor,
+		Title:       content.Title,
+		Subtext:     content.Subtext,
+		FooterNote:  content.FooterNote,
 		Code:        code,
 		Year:        time.Now().Year(),
 	})
 	if err != nil {
-		return "", fmt.Errorf("auth: failed to render verification email template: %w", err)
+		return "", fmt.Errorf("auth: failed to render code email template: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// RenderVerificationEmailHTML renders the built-in branded HTML template
+// for a verification code — a thin wrapper over RenderCodeEmailHTML using
+// the default "Verify your email" copy, kept as its own entry point since
+// it's the most common case and predates CodeEmailContent.
+func RenderVerificationEmailHTML(branding EmailBranding, code string) (string, error) {
+	return RenderCodeEmailHTML(branding, CodeEmailContent{}, code)
 }
 
 // NewBrandedHTMLBody returns an SMTPConfig.HTMLBody function backed by
@@ -106,5 +148,15 @@ func RenderVerificationEmailHTML(branding EmailBranding, code string) (string, e
 func NewBrandedHTMLBody(branding EmailBranding) func(code string) (string, error) {
 	return func(code string) (string, error) {
 		return RenderVerificationEmailHTML(branding, code)
+	}
+}
+
+// NewBrandedCodeHTMLBody is NewBrandedHTMLBody's generalized counterpart —
+// use it for any code-driven email whose copy isn't "Verify your email"
+// (e.g. a caregiver invite code), while still reusing the same branded
+// layout.
+func NewBrandedCodeHTMLBody(branding EmailBranding, content CodeEmailContent) func(code string) (string, error) {
+	return func(code string) (string, error) {
+		return RenderCodeEmailHTML(branding, content, code)
 	}
 }
