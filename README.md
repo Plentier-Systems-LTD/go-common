@@ -17,6 +17,7 @@ go-common/
 ├── billing/         Apple/Google purchase verification
 ├── entitlement/     Subscription-or-free-tier-allowance gating on top of billing
 ├── adminapi/        Read-only stats/user-list contract a platform exposes to an admin dashboard
+├── engagement/      Records "this happened" usage events (files uploaded, AI calls) for adminapi
 ├── push/            Push notifications (ExpoSender) to a user's registered devices
 ├── storage/         S3 object storage (put/url/delete), SSE-S3 encrypted
 ├── logging/         Structured JSON logging (zap)
@@ -33,6 +34,7 @@ go-common/
 └── gorm/
     ├── auth/        GORM UserStore + Bootstrap (wires Service, Google/Apple, SMTP verification)
     ├── entitlement/ GORM-backed ActiveSubscription lookup
+    ├── engagement/  GORM-backed engagement.Store (auto-migrates its own table)
     ├── push/        GORM device-token store for push
     └── postgres/    Opens the shared sqlr/GORM Postgres connection
 ```
@@ -57,6 +59,11 @@ framework/storage integrations are opt-in, nested packages.
 - **[`adminapi`](adminapi/README.md)** — the read-only contract (`GET /internal/stats`,
   `GET /internal/users` via `fiber/adminapi.Mount`) a platform implements so a central admin/stats
   dashboard can read its user counts and user list.
+- **[`engagement`](engagement/README.md)** — records aggregate, non-PII usage events (a file was
+  uploaded, an AI call was made) at the moment they happen; `internal/adminstats.Provider` reads
+  them back to fill `adminapi.PlatformStats`'s engagement fields instead of inferring counts from a
+  platform's own domain tables after the fact. `gorm/engagement.NewStore` is the ready-made GORM
+  backend, auto-migrating its own table.
 
 ### `fiber/cors`
 

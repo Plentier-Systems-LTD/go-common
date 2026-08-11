@@ -18,6 +18,13 @@ Postgres:
    keeper's `internal/adminstats` for a working template (doseline/keeper thread `*gorm.DB`
    explicitly; contractlens/medbill use `sqlr.GORM()` — match whichever convention the platform
    already uses for its own queries).
+   - For `PlatformStats`'s `FilesUploadedTotal`/`AIAnalysesTotal`/`AIChatMessagesTotal` and the
+     matching `TrendPoint` fields, use [`engagement`](engagement/README.md) — call
+     `recorder.Record(userID, engagement.FileUploaded)` etc. at the real call site (right after an
+     upload lands in storage, right after an AI reply is persisted), and have `Provider` read the
+     totals back via the same `gorm/engagement.Store`. Don't infer these counts after the fact by
+     querying a platform's own domain tables — that was the first approach here and it silently
+     drifted from what actually happened; `engagement` exists specifically to replace it.
 2. Add an `InternalAPIKey` field to `config.Config` (env var `INTERNAL_API_KEY`), documented in
    `.env.example`. No safe default — leaving it unset must disable the integration, never mount it
    with a guessable key.
