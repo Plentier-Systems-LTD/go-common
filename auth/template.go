@@ -37,8 +37,16 @@ func (b EmailBranding) withDefaults() EmailBranding {
 // CodeEmailContent customizes the copy shown around the code box, letting
 // the same branded layout serve any code-driven flow — email
 // verification, a caregiver invite code, etc. — without duplicating the
-// template. Zero value renders as a verification-code email.
+// template. Zero value renders byte-for-byte as the original
+// verification-code email (including the <title> tag, which historically
+// read "verification code" rather than the on-page heading — kept as its
+// own field below rather than reusing Title, specifically so existing
+// verification-only consumers see no output change at all).
 type CodeEmailContent struct {
+	// TitleTag is the <head><title> text (after "{{BrandName}} "), shown
+	// in a browser tab if the HTML is opened directly — most email clients
+	// ignore it. Defaults to "verification code".
+	TitleTag string
 	// Title is the large heading above the code box.
 	Title string
 	// Subtext is the smaller line below Title, above the code box.
@@ -49,6 +57,9 @@ type CodeEmailContent struct {
 }
 
 func (c CodeEmailContent) withDefaults() CodeEmailContent {
+	if c.TitleTag == "" {
+		c.TitleTag = "verification code"
+	}
 	if c.Title == "" {
 		c.Title = "Verify your email"
 	}
@@ -62,14 +73,26 @@ func (c CodeEmailContent) withDefaults() CodeEmailContent {
 }
 
 type codeEmailData struct {
-	BrandName   string
-	LogoURL     string
+	BrandName string
+	LogoURL   string
+	// AccentColor is placed directly into a CSS value, not text content —
+	// html/template applies CSS-context escaping to it regardless of type,
+	// so it stays a plain string.
 	AccentColor string
-	Title       string
-	Subtext     string
-	FooterNote  string
-	Code        string
-	Year        int
+	// TitleTag/Title/Subtext/FooterNote are template.HTML, not string:
+	// these come from CodeEmailContent, written by the calling
+	// application's own Go code (the same trust level the original,
+	// pre-CodeEmailContent template gave this copy when it was literal
+	// template source rather than a data substitution) — using string
+	// here would have html/template's auto-escaper HTML-escape it (e.g.
+	// turning "it's" into "it&#39;s"), which the original static text was
+	// never subject to. Never populate these from end-user input.
+	TitleTag   template.HTML
+	Title      template.HTML
+	Subtext    template.HTML
+	FooterNote template.HTML
+	Code       string
+	Year       int
 }
 
 // codeEmailTemplate is a table-based layout with inline styles — the
@@ -80,7 +103,7 @@ var codeEmailTemplate = template.Must(template.New("code-email").Parse(`<!doctyp
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{if .BrandName}}{{.BrandName}} {{end}}{{.Title}}</title>
+<title>{{if .BrandName}}{{.BrandName}} {{end}}{{.TitleTag}}</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f4f4f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f7;padding:32px 16px;">
@@ -122,9 +145,10 @@ func RenderCodeEmailHTML(branding EmailBranding, content CodeEmailContent, code 
 		BrandName:   branding.BrandName,
 		LogoURL:     branding.LogoURL,
 		AccentColor: branding.AccentColor,
-		Title:       content.Title,
-		Subtext:     content.Subtext,
-		FooterNote:  content.FooterNote,
+		TitleTag:    template.HTML(content.TitleTag),   //nolint:gosec // developer-supplied copy, not end-user input — see codeEmailData's doc comment
+		Title:       template.HTML(content.Title),      //nolint:gosec // same as above
+		Subtext:     template.HTML(content.Subtext),    //nolint:gosec // same as above
+		FooterNote:  template.HTML(content.FooterNote), //nolint:gosec // same as above
 		Code:        code,
 		Year:        time.Now().Year(),
 	})
