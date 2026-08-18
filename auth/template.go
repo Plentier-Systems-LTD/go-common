@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// EmailBranding customizes the built-in HTML verification email.
+// EmailBranding customizes the built-in HTML code email template.
 // BrandName is the only customization most projects need — the footer's
 // copyright line always credits Plentier Systems regardless of
 // branding, since these templates ship as part of go-common.
@@ -34,28 +34,93 @@ func (b EmailBranding) withDefaults() EmailBranding {
 	return b
 }
 
-type verificationEmailData struct {
-	BrandName   string
-	LogoURL     string
-	AccentColor string
-	Code        string
-	Link        string
-	Year        int
+// CodeEmailContent customizes the copy shown around the code box, letting
+// the same branded layout serve any code-driven flow — email
+// verification, a caregiver invite code, etc. — without duplicating the
+// template. Zero value renders byte-for-byte as the original
+// verification-code email (including the <title> tag, which historically
+// read "verification code" rather than the on-page heading — kept as its
+// own field below rather than reusing Title, specifically so existing
+// verification-only consumers see no output change at all).
+type CodeEmailContent struct {
+	// TitleTag is the <head><title> text (after "{{BrandName}} "), shown
+	// in a browser tab if the HTML is opened directly — most email clients
+	// ignore it. Defaults to "verification code".
+	TitleTag string
+	// Title is the large heading above the code box.
+	Title string
+	// Subtext is the smaller line below Title, above the code box.
+	Subtext string
+	// FooterNote replaces the default expiry/ignore note below the code
+	// box, if set.
+	FooterNote string
+	// LinkLabel is the button text shown when a link is passed to
+	// RenderCodeEmailHTMLWithLink / NewBrandedCodeHTMLBodyWithLink.
+	// Defaults to "Continue". Ignored when no link is rendered.
+	LinkLabel string
 }
 
-// verificationEmailTemplate is a table-based layout with inline styles —
-// the safest combination for rendering consistently across email clients
+func (c CodeEmailContent) withDefaults() CodeEmailContent {
+	if c.TitleTag == "" {
+		c.TitleTag = "verification code"
+	}
+	if c.Title == "" {
+		c.Title = "Verify your email"
+	}
+	if c.Subtext == "" {
+		c.Subtext = "Enter this code to confirm it's you."
+	}
+	if c.FooterNote == "" {
+		c.FooterNote = "This code expires shortly. If you didn't request it, you can safely ignore this email."
+	}
+	if c.LinkLabel == "" {
+		c.LinkLabel = "Continue"
+	}
+	return c
+}
+
+type codeEmailData struct {
+	BrandName string
+	LogoURL   string
+	// AccentColor is placed directly into a CSS value, not text content —
+	// html/template applies CSS-context escaping to it regardless of type,
+	// so it stays a plain string.
+	AccentColor string
+	// TitleTag/Title/Subtext/FooterNote are template.HTML, not string:
+	// these come from CodeEmailContent, written by the calling
+	// application's own Go code (the same trust level the original,
+	// pre-CodeEmailContent template gave this copy when it was literal
+	// template source rather than a data substitution) — using string
+	// here would have html/template's auto-escaper HTML-escape it (e.g.
+	// turning "it's" into "it&#39;s"), which the original static text was
+	// never subject to. Never populate these from end-user input.
+	TitleTag   template.HTML
+	Title      template.HTML
+	Subtext    template.HTML
+	FooterNote template.HTML
+	Code       string
+	// Link, unlike the fields above, stays a plain string — it goes into
+	// an href attribute, where html/template's URL-context escaping is
+	// exactly what's wanted. Empty means "no link", rendering identically
+	// to before Link/LinkLabel existed.
+	Link      string
+	LinkLabel string
+	Year      int
+}
+
+// codeEmailTemplate is a table-based layout with inline styles — the
+// safest combination for rendering consistently across email clients
 // (Gmail, Apple Mail, Outlook), which strip <style> blocks and modern CSS.
-// When Link is set, a "Reset password"-style button is the primary call to
-// action, with the code kept below it as a fallback for clients that strip
-// links or prefetch/invalidate them; without a Link, the code box alone is
-// the whole message, same as before.
-var verificationEmailTemplate = template.Must(template.New("verification").Parse(`<!doctype html>
+// The Link button (when set) is appended to the Subtext line rather than
+// given its own template line, so an empty Link renders the exact same
+// bytes as before Link/LinkLabel existed — see template_test.go's
+// byte-for-byte regression check.
+var codeEmailTemplate = template.Must(template.New("code-email").Parse(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{if .BrandName}}{{.BrandName}} {{end}}verification code</title>
+<title>{{if .BrandName}}{{.BrandName}} {{end}}{{.TitleTag}}</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f4f4f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f7;padding:32px 16px;">
@@ -66,18 +131,10 @@ var verificationEmailTemplate = template.Must(template.New("verification").Parse
 <td style="padding:32px 32px 24px 32px;text-align:center;">
 {{if .LogoURL}}<img src="{{.LogoURL}}" alt="{{.BrandName}}" style="max-height:40px;margin-bottom:16px;">{{end}}
 {{if .BrandName}}<div style="font-size:18px;font-weight:600;color:#111827;margin-bottom:24px;">{{.BrandName}}</div>{{end}}
-{{if .Link}}
-<div style="font-size:20px;font-weight:600;color:#111827;margin-bottom:8px;">Reset your password</div>
-<div style="font-size:14px;color:#6b7280;margin-bottom:24px;">Click below to choose a new password.</div>
-<a href="{{.Link}}" style="display:inline-block;padding:14px 32px;background-color:{{.AccentColor}};border-radius:8px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;margin-bottom:20px;">Reset password</a>
-<div style="font-size:13px;color:#9ca3af;margin-bottom:16px;">Or enter this code if the link doesn't work:</div>
-<div style="display:inline-block;padding:12px 20px;background-color:#f9fafb;border-radius:8px;font-size:24px;font-weight:700;letter-spacing:6px;color:{{.AccentColor}};margin-bottom:24px;">{{.Code}}</div>
-{{else}}
-<div style="font-size:20px;font-weight:600;color:#111827;margin-bottom:8px;">Verify your email</div>
-<div style="font-size:14px;color:#6b7280;margin-bottom:24px;">Enter this code to confirm it's you.</div>
+<div style="font-size:20px;font-weight:600;color:#111827;margin-bottom:8px;">{{.Title}}</div>
+<div style="font-size:14px;color:#6b7280;margin-bottom:24px;">{{.Subtext}}</div>{{if .Link}}<a href="{{.Link}}" style="display:inline-block;padding:14px 32px;background-color:{{.AccentColor}};border-radius:8px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;margin-bottom:20px;">{{.LinkLabel}}</a><div style="font-size:13px;color:#9ca3af;margin-bottom:16px;">Or use this code if the button doesn't work:</div>{{end}}
 <div style="display:inline-block;padding:16px 24px;background-color:#f9fafb;border-radius:8px;font-size:32px;font-weight:700;letter-spacing:8px;color:{{.AccentColor}};margin-bottom:24px;">{{.Code}}</div>
-{{end}}
-<div style="font-size:13px;color:#9ca3af;">This code expires shortly. If you didn't request it, you can safely ignore this email.</div>
+<div style="font-size:13px;color:#9ca3af;">{{.FooterNote}}</div>
 </td>
 </tr>
 <tr>
@@ -93,33 +150,63 @@ var verificationEmailTemplate = template.Must(template.New("verification").Parse
 </html>
 `))
 
-// RenderVerificationEmailHTML renders the built-in branded HTML template
-// for a verification code. Use it directly, or pass NewBrandedHTMLBody's
+// RenderCodeEmailHTML renders the built-in branded HTML template for any
+// code-driven email. Use it directly, or pass NewBrandedCodeHTMLBody's
 // result as SMTPConfig.HTMLBody to wire it into SMTPSender.
-func RenderVerificationEmailHTML(branding EmailBranding, code string) (string, error) {
-	return RenderVerificationEmailHTMLWithLink(branding, code, "")
+func RenderCodeEmailHTML(branding EmailBranding, content CodeEmailContent, code string) (string, error) {
+	return RenderCodeEmailHTMLWithLink(branding, content, code, "")
 }
 
-// RenderVerificationEmailHTMLWithLink is RenderVerificationEmailHTML plus a
-// clickable link (typically a reset-password URL with the code embedded as
-// a query param) rendered as the email's primary call to action. Passing
-// an empty link renders identically to RenderVerificationEmailHTML.
-func RenderVerificationEmailHTMLWithLink(branding EmailBranding, code, link string) (string, error) {
+// RenderCodeEmailHTMLWithLink is RenderCodeEmailHTML plus a clickable
+// link (e.g. a reset-password URL with the code embedded as a query
+// param) rendered as a button above the code box, which stays visible as
+// a fallback for clients that strip links or prefetch/invalidate them.
+// Passing an empty link renders identically to RenderCodeEmailHTML.
+func RenderCodeEmailHTMLWithLink(branding EmailBranding, content CodeEmailContent, code, link string) (string, error) {
 	branding = branding.withDefaults()
+	content = content.withDefaults()
 
 	var buf bytes.Buffer
-	err := verificationEmailTemplate.Execute(&buf, verificationEmailData{
+	err := codeEmailTemplate.Execute(&buf, codeEmailData{
 		BrandName:   branding.BrandName,
 		LogoURL:     branding.LogoURL,
 		AccentColor: branding.AccentColor,
+		TitleTag:    template.HTML(content.TitleTag),   //nolint:gosec // developer-supplied copy, not end-user input — see codeEmailData's doc comment
+		Title:       template.HTML(content.Title),      //nolint:gosec // same as above
+		Subtext:     template.HTML(content.Subtext),    //nolint:gosec // same as above
+		FooterNote:  template.HTML(content.FooterNote), //nolint:gosec // same as above
 		Code:        code,
 		Link:        link,
+		LinkLabel:   content.LinkLabel,
 		Year:        time.Now().Year(),
 	})
 	if err != nil {
-		return "", fmt.Errorf("auth: failed to render verification email template: %w", err)
+		return "", fmt.Errorf("auth: failed to render code email template: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// RenderVerificationEmailHTML renders the built-in branded HTML template
+// for a verification code — a thin wrapper over RenderCodeEmailHTML using
+// the default "Verify your email" copy, kept as its own entry point since
+// it's the most common case and predates CodeEmailContent.
+func RenderVerificationEmailHTML(branding EmailBranding, code string) (string, error) {
+	return RenderCodeEmailHTML(branding, CodeEmailContent{}, code)
+}
+
+// RenderVerificationEmailHTMLWithLink is RenderVerificationEmailHTML plus
+// a clickable link — see RenderCodeEmailHTMLWithLink. Uses reset-password
+// copy (rather than "Verify your email") since a link alongside the code
+// is, in practice, always a reset-password flow: a bare code is enough
+// for in-app entry, but a link needs somewhere to go, and that's a set-
+// new-password page. Use RenderCodeEmailHTMLWithLink directly if some
+// other code-driven flow ever needs a link with different copy.
+func RenderVerificationEmailHTMLWithLink(branding EmailBranding, code, link string) (string, error) {
+	return RenderCodeEmailHTMLWithLink(branding, CodeEmailContent{
+		Title:     "Reset your password",
+		Subtext:   "Click below to choose a new password.",
+		LinkLabel: "Reset password",
+	}, code, link)
 }
 
 // NewBrandedHTMLBody returns an SMTPConfig.HTMLBody function backed by
@@ -128,6 +215,16 @@ func RenderVerificationEmailHTMLWithLink(branding EmailBranding, code, link stri
 func NewBrandedHTMLBody(branding EmailBranding) func(code string) (string, error) {
 	return func(code string) (string, error) {
 		return RenderVerificationEmailHTML(branding, code)
+	}
+}
+
+// NewBrandedCodeHTMLBody is NewBrandedHTMLBody's generalized counterpart —
+// use it for any code-driven email whose copy isn't "Verify your email"
+// (e.g. a caregiver invite code), while still reusing the same branded
+// layout.
+func NewBrandedCodeHTMLBody(branding EmailBranding, content CodeEmailContent) func(code string) (string, error) {
+	return func(code string) (string, error) {
+		return RenderCodeEmailHTML(branding, content, code)
 	}
 }
 

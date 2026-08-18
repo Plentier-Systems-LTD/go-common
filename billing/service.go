@@ -90,6 +90,14 @@ func (s *Service) ProcessPurchaseResult(ctx context.Context, userID string, prov
 			// handlers.go's FindUserIDByOriginalTransactionID fallback),
 			// so this is a no-op reassignment for them.
 			sub.UserID = userID
+			// Apple/Google keep the SAME original transaction ID when a
+			// user switches tiers within one subscription group (e.g.
+			// Monthly -> Annual is a plan change on the existing
+			// subscription, not a new one) — so this branch is also how a
+			// tier upgrade/downgrade is recorded. Without updating PlanID
+			// here too, an upgrade would verify successfully but silently
+			// keep the subscriber entitled under their old tier's PlanID.
+			sub.PlanID = res.ProductID
 		}
 
 		// 2. Update status based on expiration and event type
@@ -104,6 +112,25 @@ func (s *Service) ProcessPurchaseResult(ctx context.Context, userID string, prov
 
 		if err := tx.Save(&sub).Error; err != nil {
 			return err
+		}
+
+		// A user can only ever hold one active premium entitlement — but
+		// Apple/Google can hand back a different original_transaction_id for
+		// what the user experiences as "the same subscription" (a fresh
+		// purchase after fully cancelling rather than an in-place tier
+		// change, or repeated test purchases during QA). Without this, an
+		// older row's expires_at can outlast a newer, correctly-verified
+		// one and keep winning ActiveSubscriptionQuery's `expires_at DESC`
+		// ordering, so the app shows a stale plan even after a successful
+		// upgrade. Superseding every other active row for this user each
+		// time one is (re)verified keeps at most one candidate active, so
+		// the most recently verified purchase always wins.
+		if sub.Status == StatusActive {
+			if err := tx.Model(&Subscription{}).
+				Where("user_id = ? AND id <> ? AND status = ?", userID, sub.ID, StatusActive).
+				Update("status", StatusCanceled).Error; err != nil {
+				return err
+			}
 		}
 
 		if alreadyLogged {
