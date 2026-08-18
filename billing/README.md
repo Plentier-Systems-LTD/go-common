@@ -128,6 +128,71 @@ premium.Get("/premium-feature", handlers.PremiumFeature)
 active, err := billingSvc.IsSubscribed(ctx, userID)
 ```
 
+## Promo codes
+
+Admin-issued codes redeemable for bonus entitlement days, a discounted recurring price, or both
+— not tied to Apple/Google (they don't know about it; a redeemed code either grants a comp
+`Subscription` directly or discounts an existing one's contribution to `ActiveRevenueUSDCents`).
+
+```go
+promo, err := svc.CreatePromoCode(ctx, billing.CreatePromoCodeParams{
+    // Code left blank -> one is generated, e.g. "7K2XQ9AB".
+    Description:   "Launch week — 25% off, first month free",
+    DiscountType:  billing.PromoPercent, // or billing.PromoFixed (DiscountValue in USD cents)
+    DiscountValue: 25,
+    FreeDays:      30,
+    ExpiresAt:     &expiresAt, // optional
+})
+```
+
+A client redeems one directly against `Service` — there's no `Handler` route for this (same as
+`VerifyAndProcessPurchase`, see above):
+
+```go
+// handlers/promo.go
+func RedeemPromo(svc *billing.Service) fiber.Handler {
+    return func(c *fiber.Ctx) error {
+        var req struct {
+            Code   string `json:"code"`
+            PlanId string `json:"planId"`
+        }
+        if err := c.BodyParser(&req); err != nil {
+            return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
+        }
+
+        claims, _ := fiberauth.User(c)
+        result, err := svc.RedeemPromoCode(c.UserContext(), claims.UserID, req.Code, req.PlanId)
+        if err != nil {
+            return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+        }
+        return c.JSON(result)
+    }
+}
+```
+
+### Letting the dashboard manage your promo codes
+
+Implement `adminapi.PromoProvider`'s four methods on your `Provider` by delegating straight to
+`Service`'s `*ForAdmin` methods — they already speak `adminapi`'s wire types:
+
+```go
+func (p *Provider) ListPromoCodes(ctx context.Context) ([]adminapi.PromoCodeSummary, error) {
+    return p.billing.ListPromoCodesForAdmin(ctx)
+}
+func (p *Provider) CreatePromoCode(ctx context.Context, req adminapi.CreatePromoCodeRequest) (adminapi.PromoCodeSummary, error) {
+    return p.billing.CreatePromoCodeForAdmin(ctx, req)
+}
+func (p *Provider) SetPromoCodeActive(ctx context.Context, code string, active bool) (adminapi.PromoCodeSummary, error) {
+    return p.billing.SetPromoCodeActiveForAdmin(ctx, code, active)
+}
+func (p *Provider) DeletePromoCode(ctx context.Context, code string) error {
+    return p.billing.DeletePromoCodeForAdmin(ctx, code)
+}
+```
+
+`fiber/adminapi.Mount` picks these up automatically the same way it picks up `MutableProvider` —
+implement the interface and `/internal/promo-codes` routes appear, nothing else to wire.
+
 ## Design notes
 
 - **Storage- and framework-agnostic verification** — `AppleProvider`/`GoogleProvider` return a

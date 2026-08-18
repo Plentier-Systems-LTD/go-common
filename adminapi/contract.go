@@ -120,3 +120,50 @@ type MutableProvider interface {
 	UpdateUser(ctx context.Context, id string, patch UserPatch) (UserSummary, error)
 	DeleteUser(ctx context.Context, id string) error
 }
+
+// PromoCodeSummary is one promo code as reported to the dashboard — see
+// billing.PromoCode, which this mirrors over the wire. DiscountType is
+// "percent" | "fixed" | "" (no price discount, only FreeDays).
+type PromoCodeSummary struct {
+	Code            string     `json:"code"`
+	Description     string     `json:"description,omitempty"`
+	PlanID          string     `json:"planId,omitempty"`
+	DiscountType    string     `json:"discountType,omitempty"`
+	DiscountValue   int64      `json:"discountValue,omitempty"`
+	FreeDays        int        `json:"freeDays,omitempty"`
+	MaxRedemptions  int        `json:"maxRedemptions,omitempty"`
+	RedemptionCount int        `json:"redemptionCount"`
+	ExpiresAt       *time.Time `json:"expiresAt,omitempty"`
+	Active          bool       `json:"active"`
+	CreatedByEmail  string     `json:"createdByEmail,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+}
+
+// CreatePromoCodeRequest is a dashboard-issued request to mint a new promo
+// code. Code left blank means "generate one" — the platform's own
+// billing.Service.CreatePromoCode (via CreatePromoCodeForAdmin) does that.
+type CreatePromoCodeRequest struct {
+	Code           string     `json:"code,omitempty"`
+	Description    string     `json:"description,omitempty"`
+	PlanID         string     `json:"planId,omitempty"`
+	DiscountType   string     `json:"discountType,omitempty"`
+	DiscountValue  int64      `json:"discountValue,omitempty"`
+	FreeDays       int        `json:"freeDays,omitempty"`
+	MaxRedemptions int        `json:"maxRedemptions,omitempty"`
+	ExpiresAt      *time.Time `json:"expiresAt,omitempty"`
+	CreatedByEmail string     `json:"createdByEmail,omitempty"`
+}
+
+// PromoProvider is the optional promo-code-admin half of Provider — a
+// platform implements it only if it wants the dashboard to manage its
+// promo codes, the same optional-interface pattern as MutableProvider.
+// github.com/Plentier-Systems-LTD/go-common/billing's PromoCodeForAdmin
+// methods on Service do the actual work; a platform's Provider typically
+// just delegates to them.
+type PromoProvider interface {
+	Provider
+	ListPromoCodes(ctx context.Context) ([]PromoCodeSummary, error)
+	CreatePromoCode(ctx context.Context, req CreatePromoCodeRequest) (PromoCodeSummary, error)
+	SetPromoCodeActive(ctx context.Context, code string, active bool) (PromoCodeSummary, error)
+	DeletePromoCode(ctx context.Context, code string) error
+}

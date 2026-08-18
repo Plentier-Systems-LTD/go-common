@@ -32,8 +32,16 @@ type SMTPConfig struct {
 	// HTMLBody, if set, renders an HTML email body for a given code; the
 	// email is then sent as multipart/alternative with both parts. Use
 	// NewBrandedHTMLBody(EmailBranding{...}) for the built-in template,
-	// or supply your own renderer.
+	// or supply your own renderer. Ignored when HTMLBodyWithLink is set.
 	HTMLBody func(code string) (string, error)
+
+	// HTMLBodyWithLink is HTMLBody's link-aware counterpart — renders an
+	// HTML body given both the recipient address and the code, e.g. to
+	// embed a clickable reset-password URL alongside the code. Use
+	// NewBrandedHTMLBodyWithLink(EmailBranding{...}, linkFor) for the
+	// built-in template, or supply your own. Takes precedence over
+	// HTMLBody when both are set.
+	HTMLBodyWithLink func(to, code string) (string, error)
 }
 
 func (c SMTPConfig) withDefaults() SMTPConfig {
@@ -99,14 +107,20 @@ func (s *SMTPSender) SendVerificationCode(_ context.Context, to string, code str
 func (s *SMTPSender) buildMessage(to, code string) ([]byte, error) {
 	textBody := s.cfg.Body(code)
 
-	if s.cfg.HTMLBody == nil {
+	if s.cfg.HTMLBodyWithLink == nil && s.cfg.HTMLBody == nil {
 		return []byte(fmt.Sprintf(
 			"From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
 			s.cfg.From, to, s.cfg.Subject, textBody,
 		)), nil
 	}
 
-	htmlBody, err := s.cfg.HTMLBody(code)
+	var htmlBody string
+	var err error
+	if s.cfg.HTMLBodyWithLink != nil {
+		htmlBody, err = s.cfg.HTMLBodyWithLink(to, code)
+	} else {
+		htmlBody, err = s.cfg.HTMLBody(code)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("auth: failed to render html verification email: %w", err)
 	}

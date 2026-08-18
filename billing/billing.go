@@ -37,7 +37,7 @@ type InitResult struct {
 // pair; see InitResult and Config for which providers end up enabled.
 // Credentials that are set but invalid are still a hard error.
 func Initialize(db *gorm.DB, cfg Config) (*InitResult, error) {
-	if err := db.AutoMigrate(&BillingPlan{}, &Subscription{}, &Transaction{}); err != nil {
+	if err := db.AutoMigrate(&BillingPlan{}, &Subscription{}, &Transaction{}, &PromoCode{}, &PromoRedemption{}); err != nil {
 		return nil, fmt.Errorf("billing: failed to auto-migrate schema: %w", err)
 	}
 

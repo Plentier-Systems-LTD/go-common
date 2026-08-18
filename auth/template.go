@@ -39,12 +39,17 @@ type verificationEmailData struct {
 	LogoURL     string
 	AccentColor string
 	Code        string
+	Link        string
 	Year        int
 }
 
 // verificationEmailTemplate is a table-based layout with inline styles —
 // the safest combination for rendering consistently across email clients
 // (Gmail, Apple Mail, Outlook), which strip <style> blocks and modern CSS.
+// When Link is set, a "Reset password"-style button is the primary call to
+// action, with the code kept below it as a fallback for clients that strip
+// links or prefetch/invalidate them; without a Link, the code box alone is
+// the whole message, same as before.
 var verificationEmailTemplate = template.Must(template.New("verification").Parse(`<!doctype html>
 <html lang="en">
 <head>
@@ -61,9 +66,17 @@ var verificationEmailTemplate = template.Must(template.New("verification").Parse
 <td style="padding:32px 32px 24px 32px;text-align:center;">
 {{if .LogoURL}}<img src="{{.LogoURL}}" alt="{{.BrandName}}" style="max-height:40px;margin-bottom:16px;">{{end}}
 {{if .BrandName}}<div style="font-size:18px;font-weight:600;color:#111827;margin-bottom:24px;">{{.BrandName}}</div>{{end}}
+{{if .Link}}
+<div style="font-size:20px;font-weight:600;color:#111827;margin-bottom:8px;">Reset your password</div>
+<div style="font-size:14px;color:#6b7280;margin-bottom:24px;">Click below to choose a new password.</div>
+<a href="{{.Link}}" style="display:inline-block;padding:14px 32px;background-color:{{.AccentColor}};border-radius:8px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;margin-bottom:20px;">Reset password</a>
+<div style="font-size:13px;color:#9ca3af;margin-bottom:16px;">Or enter this code if the link doesn't work:</div>
+<div style="display:inline-block;padding:12px 20px;background-color:#f9fafb;border-radius:8px;font-size:24px;font-weight:700;letter-spacing:6px;color:{{.AccentColor}};margin-bottom:24px;">{{.Code}}</div>
+{{else}}
 <div style="font-size:20px;font-weight:600;color:#111827;margin-bottom:8px;">Verify your email</div>
 <div style="font-size:14px;color:#6b7280;margin-bottom:24px;">Enter this code to confirm it's you.</div>
 <div style="display:inline-block;padding:16px 24px;background-color:#f9fafb;border-radius:8px;font-size:32px;font-weight:700;letter-spacing:8px;color:{{.AccentColor}};margin-bottom:24px;">{{.Code}}</div>
+{{end}}
 <div style="font-size:13px;color:#9ca3af;">This code expires shortly. If you didn't request it, you can safely ignore this email.</div>
 </td>
 </tr>
@@ -84,6 +97,14 @@ var verificationEmailTemplate = template.Must(template.New("verification").Parse
 // for a verification code. Use it directly, or pass NewBrandedHTMLBody's
 // result as SMTPConfig.HTMLBody to wire it into SMTPSender.
 func RenderVerificationEmailHTML(branding EmailBranding, code string) (string, error) {
+	return RenderVerificationEmailHTMLWithLink(branding, code, "")
+}
+
+// RenderVerificationEmailHTMLWithLink is RenderVerificationEmailHTML plus a
+// clickable link (typically a reset-password URL with the code embedded as
+// a query param) rendered as the email's primary call to action. Passing
+// an empty link renders identically to RenderVerificationEmailHTML.
+func RenderVerificationEmailHTMLWithLink(branding EmailBranding, code, link string) (string, error) {
 	branding = branding.withDefaults()
 
 	var buf bytes.Buffer
@@ -92,6 +113,7 @@ func RenderVerificationEmailHTML(branding EmailBranding, code string) (string, e
 		LogoURL:     branding.LogoURL,
 		AccentColor: branding.AccentColor,
 		Code:        code,
+		Link:        link,
 		Year:        time.Now().Year(),
 	})
 	if err != nil {
@@ -106,5 +128,16 @@ func RenderVerificationEmailHTML(branding EmailBranding, code string) (string, e
 func NewBrandedHTMLBody(branding EmailBranding) func(code string) (string, error) {
 	return func(code string) (string, error) {
 		return RenderVerificationEmailHTML(branding, code)
+	}
+}
+
+// NewBrandedHTMLBodyWithLink returns an SMTPConfig.HTMLBodyWithLink
+// function backed by the built-in branded template — linkFor builds the
+// clickable reset URL from the recipient's email and the code (e.g.
+// embedding both as query params so the page they land on can call
+// VerifyEmail/reset the same way manual code entry does).
+func NewBrandedHTMLBodyWithLink(branding EmailBranding, linkFor func(to, code string) string) func(to, code string) (string, error) {
+	return func(to, code string) (string, error) {
+		return RenderVerificationEmailHTMLWithLink(branding, code, linkFor(to, code))
 	}
 }

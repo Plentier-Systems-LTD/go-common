@@ -23,6 +23,17 @@ type SMTPConfig struct {
 	// Branding drives the built-in HTML verification email
 	// (sharedauth.NewBrandedHTMLBody).
 	Branding sharedauth.EmailBranding
+
+	// ResetLinkURL, if set, builds a clickable reset-password URL from the
+	// recipient's email and the code — e.g.
+	//
+	//	func(to, code string) string {
+	//	    return fmt.Sprintf("%s/?resetEmail=%s&resetCode=%s", frontendURL, url.QueryEscape(to), url.QueryEscape(code))
+	//	}
+	//
+	// The email then leads with that link (sharedauth.NewBrandedHTMLBodyWithLink)
+	// instead of showing only the bare code.
+	ResetLinkURL func(to, code string) string
 }
 
 // BootstrapConfig configures Bootstrap.
@@ -140,7 +151,7 @@ func setupVerification[PT sharedauth.User](db *gorm.DB, cfg *SMTPConfig, warn fu
 		return nil, noop
 	}
 
-	sender, err := sharedauth.NewSMTPSender(sharedauth.SMTPConfig{
+	smtpCfg := sharedauth.SMTPConfig{
 		Host:     cfg.Host,
 		Port:     cfg.Port,
 		Username: cfg.Username,
@@ -148,8 +159,14 @@ func setupVerification[PT sharedauth.User](db *gorm.DB, cfg *SMTPConfig, warn fu
 		From:     cfg.From,
 		Subject:  cfg.Subject,
 		Body:     cfg.Body,
-		HTMLBody: sharedauth.NewBrandedHTMLBody(cfg.Branding),
-	})
+	}
+	if cfg.ResetLinkURL != nil {
+		smtpCfg.HTMLBodyWithLink = sharedauth.NewBrandedHTMLBodyWithLink(cfg.Branding, cfg.ResetLinkURL)
+	} else {
+		smtpCfg.HTMLBody = sharedauth.NewBrandedHTMLBody(cfg.Branding)
+	}
+
+	sender, err := sharedauth.NewSMTPSender(smtpCfg)
 	if err != nil {
 		warn("email verification disabled: failed to initialize SMTP sender", err)
 		return nil, noop

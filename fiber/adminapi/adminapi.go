@@ -90,4 +90,49 @@ func Mount(router fiber.Router, provider sharedadminapi.Provider, apiKey string)
 			return c.SendStatus(fiber.StatusNoContent)
 		})
 	}
+
+	if promo, ok := provider.(sharedadminapi.PromoProvider); ok {
+		group.Get("/promo-codes", func(c *fiber.Ctx) error {
+			codes, err := promo.ListPromoCodes(c.UserContext())
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusInternalServerError, "failed to load promo codes")
+			}
+			return c.JSON(codes)
+		})
+
+		group.Post("/promo-codes", func(c *fiber.Ctx) error {
+			var req sharedadminapi.CreatePromoCodeRequest
+			if err := c.BodyParser(&req); err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, "invalid request body")
+			}
+
+			code, err := promo.CreatePromoCode(c.UserContext(), req)
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, err.Error())
+			}
+			return c.Status(fiber.StatusCreated).JSON(code)
+		})
+
+		group.Patch("/promo-codes/:code", func(c *fiber.Ctx) error {
+			var req struct {
+				Active bool `json:"active"`
+			}
+			if err := c.BodyParser(&req); err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, "invalid request body")
+			}
+
+			code, err := promo.SetPromoCodeActive(c.UserContext(), c.Params("code"), req.Active)
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, err.Error())
+			}
+			return c.JSON(code)
+		})
+
+		group.Delete("/promo-codes/:code", func(c *fiber.Ctx) error {
+			if err := promo.DeletePromoCode(c.UserContext(), c.Params("code")); err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, err.Error())
+			}
+			return c.SendStatus(fiber.StatusNoContent)
+		})
+	}
 }

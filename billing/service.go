@@ -158,15 +158,16 @@ func activeSubscriptionsQuery(db *gorm.DB) *gorm.DB {
 	return db.Model(&Subscription{}).Where("status = ? AND expires_at > ?", StatusActive, time.Now())
 }
 
-// ActiveRevenueUSDCents sums PriceUSDCents across every plan with a
-// currently active, unexpired subscription — a live recurring-revenue
-// estimate (MRR), not a substitute for real accounting: it reflects what's
-// active right now, not what was actually charged historically.
+// ActiveRevenueUSDCents sums PriceUSDCents (less any PromoDiscountUSDCents
+// applied by RedeemPromoCode) across every plan with a currently active,
+// unexpired subscription — a live recurring-revenue estimate (MRR), not a
+// substitute for real accounting: it reflects what's active right now, not
+// what was actually charged historically.
 func ActiveRevenueUSDCents(ctx context.Context, db *gorm.DB) (int64, error) {
 	var totalCents int64
 	err := activeSubscriptionsQuery(db.WithContext(ctx)).
 		Joins("JOIN billing_plans ON billing_plans.id = subscriptions.plan_id").
-		Select("COALESCE(SUM(billing_plans.price_usd_cents), 0)").
+		Select("COALESCE(SUM(GREATEST(billing_plans.price_usd_cents - subscriptions.promo_discount_usd_cents, 0)), 0)").
 		Scan(&totalCents).Error
 	return totalCents, err
 }
