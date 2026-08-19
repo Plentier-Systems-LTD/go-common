@@ -22,6 +22,7 @@ var (
 	ErrPromoWrongPlan       = errors.New("billing: this promo code doesn't apply to that plan")
 	ErrPromoNoTarget        = errors.New("billing: this code only discounts an existing subscription, and the user has none on the matching plan")
 	ErrPromoInvalidDiscount = errors.New("billing: invalid promo discount")
+	ErrServiceNotConfigured = errors.New("billing: service not configured")
 )
 
 // promoAlphabet excludes visually ambiguous characters (0/O, 1/I/L) so a

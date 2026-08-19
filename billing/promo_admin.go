@@ -6,13 +6,7 @@ import (
 	"github.com/Plentier-Systems-LTD/go-common/adminapi"
 )
 
-// This file adapts Service's promo code methods to go-common/adminapi's
-// wire shapes, so a platform's own adminapi.Provider can satisfy
-// adminapi.PromoProvider in a few one-line delegating methods, e.g.:
-//
-//	func (p *Provider) ListPromoCodes(ctx context.Context) ([]adminapi.PromoCodeSummary, error) {
-//	    return p.billing.ListPromoCodesForAdmin(ctx)
-//	}
+// This file adapts Service's promo code methods to adminapi's wire shapes so a platform's Provider can satisfy adminapi.PromoProvider by delegating.
 
 func toPromoCodeSummary(p PromoCode) adminapi.PromoCodeSummary {
 	return adminapi.PromoCodeSummary{
@@ -33,6 +27,9 @@ func toPromoCodeSummary(p PromoCode) adminapi.PromoCodeSummary {
 
 // ListPromoCodesForAdmin lists every promo code in adminapi's wire shape.
 func (s *Service) ListPromoCodesForAdmin(ctx context.Context) ([]adminapi.PromoCodeSummary, error) {
+	if s == nil {
+		return nil, ErrServiceNotConfigured
+	}
 	codes, err := s.ListPromoCodes(ctx)
 	if err != nil {
 		return nil, err
@@ -46,6 +43,9 @@ func (s *Service) ListPromoCodesForAdmin(ctx context.Context) ([]adminapi.PromoC
 
 // CreatePromoCodeForAdmin creates a promo code from an adminapi request.
 func (s *Service) CreatePromoCodeForAdmin(ctx context.Context, req adminapi.CreatePromoCodeRequest) (adminapi.PromoCodeSummary, error) {
+	if s == nil {
+		return adminapi.PromoCodeSummary{}, ErrServiceNotConfigured
+	}
 	promo, err := s.CreatePromoCode(ctx, CreatePromoCodeParams{
 		Code:           req.Code,
 		Description:    req.Description,
@@ -65,6 +65,9 @@ func (s *Service) CreatePromoCodeForAdmin(ctx context.Context, req adminapi.Crea
 
 // SetPromoCodeActiveForAdmin flips a promo code's Active flag.
 func (s *Service) SetPromoCodeActiveForAdmin(ctx context.Context, code string, active bool) (adminapi.PromoCodeSummary, error) {
+	if s == nil {
+		return adminapi.PromoCodeSummary{}, ErrServiceNotConfigured
+	}
 	promo, err := s.SetPromoCodeActive(ctx, code, active)
 	if err != nil {
 		return adminapi.PromoCodeSummary{}, err
@@ -74,5 +77,8 @@ func (s *Service) SetPromoCodeActiveForAdmin(ctx context.Context, code string, a
 
 // DeletePromoCodeForAdmin soft-deletes a promo code.
 func (s *Service) DeletePromoCodeForAdmin(ctx context.Context, code string) error {
+	if s == nil {
+		return ErrServiceNotConfigured
+	}
 	return s.DeletePromoCode(ctx, code)
 }
