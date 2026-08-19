@@ -5,6 +5,7 @@ package adminapi
 
 import (
 	"crypto/subtle"
+	"strconv"
 
 	sharedadminapi "github.com/Plentier-Systems-LTD/go-common/adminapi"
 	"github.com/Plentier-Systems-LTD/go-common/fiber/httpx"
@@ -130,6 +131,118 @@ func Mount(router fiber.Router, provider sharedadminapi.Provider, apiKey string)
 
 		group.Delete("/promo-codes/:code", func(c *fiber.Ctx) error {
 			if err := promo.DeletePromoCode(c.UserContext(), c.Params("code")); err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, err.Error())
+			}
+			return c.SendStatus(fiber.StatusNoContent)
+		})
+	}
+
+	if campaigns, ok := provider.(sharedadminapi.CampaignProvider); ok {
+		group.Get("/campaigns", func(c *fiber.Ctx) error {
+			list, err := campaigns.ListCampaigns(c.UserContext())
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusInternalServerError, "failed to load campaigns")
+			}
+			return c.JSON(list)
+		})
+
+		group.Post("/campaigns", func(c *fiber.Ctx) error {
+			var req sharedadminapi.CreateCampaignRequest
+			if err := c.BodyParser(&req); err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, "invalid request body")
+			}
+
+			campaign, err := campaigns.CreateCampaign(c.UserContext(), req)
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, err.Error())
+			}
+			return c.Status(fiber.StatusCreated).JSON(campaign)
+		})
+
+		group.Post("/campaigns/preview", func(c *fiber.Ctx) error {
+			var req sharedadminapi.CreateCampaignRequest
+			if err := c.BodyParser(&req); err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, "invalid request body")
+			}
+
+			preview, err := campaigns.PreviewAudience(c.UserContext(), req)
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, err.Error())
+			}
+			return c.JSON(preview)
+		})
+
+		group.Patch("/campaigns/:id", func(c *fiber.Ctx) error {
+			id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, "invalid campaign id")
+			}
+
+			var req sharedadminapi.UpdateCampaignRequest
+			if err := c.BodyParser(&req); err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, "invalid request body")
+			}
+
+			campaign, err := campaigns.UpdateCampaign(c.UserContext(), uint(id), req)
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, err.Error())
+			}
+			return c.JSON(campaign)
+		})
+
+		group.Delete("/campaigns/:id", func(c *fiber.Ctx) error {
+			id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, "invalid campaign id")
+			}
+
+			if err := campaigns.DeleteCampaign(c.UserContext(), uint(id)); err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, err.Error())
+			}
+			return c.SendStatus(fiber.StatusNoContent)
+		})
+
+		group.Post("/campaigns/:id/send", func(c *fiber.Ctx) error {
+			id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, "invalid campaign id")
+			}
+
+			campaign, err := campaigns.SendCampaignNow(c.UserContext(), uint(id))
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, err.Error())
+			}
+			return c.JSON(campaign)
+		})
+
+		group.Get("/campaign-templates", func(c *fiber.Ctx) error {
+			list, err := campaigns.ListTemplates(c.UserContext())
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusInternalServerError, "failed to load templates")
+			}
+			return c.JSON(list)
+		})
+
+		group.Post("/campaign-templates", func(c *fiber.Ctx) error {
+			var req sharedadminapi.CreateTemplateRequest
+			if err := c.BodyParser(&req); err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, "invalid request body")
+			}
+
+			template, err := campaigns.CreateTemplate(c.UserContext(), req)
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, err.Error())
+			}
+			return c.Status(fiber.StatusCreated).JSON(template)
+		})
+
+		group.Delete("/campaign-templates/:id", func(c *fiber.Ctx) error {
+			id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+			if err != nil {
+				return httpx.SendError(c, fiber.StatusBadRequest, "invalid template id")
+			}
+
+			if err := campaigns.DeleteTemplate(c.UserContext(), uint(id)); err != nil {
 				return httpx.SendError(c, fiber.StatusBadRequest, err.Error())
 			}
 			return c.SendStatus(fiber.StatusNoContent)

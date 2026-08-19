@@ -167,3 +167,82 @@ type PromoProvider interface {
 	SetPromoCodeActive(ctx context.Context, code string, active bool) (PromoCodeSummary, error)
 	DeletePromoCode(ctx context.Context, code string) error
 }
+
+// CampaignSummary mirrors campaign.Campaign over the wire. Status is draft|scheduled|sending|sent|failed.
+type CampaignSummary struct {
+	ID             uint       `json:"id"`
+	Name           string     `json:"name"`
+	Subject        string     `json:"subject"`
+	Body           string     `json:"body"`
+	Status         string     `json:"status"`
+	ScheduledAt    *time.Time `json:"scheduledAt,omitempty"`
+	SentAt         *time.Time `json:"sentAt,omitempty"`
+	RecipientCount int        `json:"recipientCount"`
+	FailureReason  string     `json:"failureReason,omitempty"`
+	NeverActive    bool       `json:"neverActive,omitempty"`
+	InactiveDays   int        `json:"inactiveDays,omitempty"`
+	PlanStatuses   []string   `json:"planStatuses,omitempty"`
+	CreatedByEmail string     `json:"createdByEmail,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+}
+
+// CreateCampaignRequest creates a campaign; leaving ScheduledAt nil creates a draft.
+type CreateCampaignRequest struct {
+	Name           string     `json:"name"`
+	Subject        string     `json:"subject"`
+	Body           string     `json:"body"`
+	NeverActive    bool       `json:"neverActive,omitempty"`
+	InactiveDays   int        `json:"inactiveDays,omitempty"`
+	PlanStatuses   []string   `json:"planStatuses,omitempty"`
+	ScheduledAt    *time.Time `json:"scheduledAt,omitempty"`
+	CreatedByEmail string     `json:"createdByEmail,omitempty"`
+}
+
+// UpdateCampaignRequest is a partial edit; ClearSchedule wins over ScheduledAt if both are set.
+type UpdateCampaignRequest struct {
+	Name          *string    `json:"name,omitempty"`
+	Subject       *string    `json:"subject,omitempty"`
+	Body          *string    `json:"body,omitempty"`
+	NeverActive   *bool      `json:"neverActive,omitempty"`
+	InactiveDays  *int       `json:"inactiveDays,omitempty"`
+	PlanStatuses  *[]string  `json:"planStatuses,omitempty"`
+	ScheduledAt   *time.Time `json:"scheduledAt,omitempty"`
+	ClearSchedule bool       `json:"clearSchedule,omitempty"`
+}
+
+// TemplateSummary mirrors campaign.CampaignTemplate over the wire.
+type TemplateSummary struct {
+	ID             uint      `json:"id"`
+	Name           string    `json:"name"`
+	Subject        string    `json:"subject"`
+	Body           string    `json:"body"`
+	CreatedByEmail string    `json:"createdByEmail,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+// CreateTemplateRequest creates a new reusable template.
+type CreateTemplateRequest struct {
+	Name           string `json:"name"`
+	Subject        string `json:"subject"`
+	Body           string `json:"body"`
+	CreatedByEmail string `json:"createdByEmail,omitempty"`
+}
+
+// AudiencePreview is how many recipients a filter currently matches.
+type AudiencePreview struct {
+	Count int `json:"count"`
+}
+
+// CampaignProvider is the optional campaigns-admin half of Provider, the same optional-interface pattern as PromoProvider.
+type CampaignProvider interface {
+	Provider
+	ListCampaigns(ctx context.Context) ([]CampaignSummary, error)
+	CreateCampaign(ctx context.Context, req CreateCampaignRequest) (CampaignSummary, error)
+	UpdateCampaign(ctx context.Context, id uint, req UpdateCampaignRequest) (CampaignSummary, error)
+	DeleteCampaign(ctx context.Context, id uint) error
+	SendCampaignNow(ctx context.Context, id uint) (CampaignSummary, error)
+	PreviewAudience(ctx context.Context, req CreateCampaignRequest) (AudiencePreview, error)
+	ListTemplates(ctx context.Context) ([]TemplateSummary, error)
+	CreateTemplate(ctx context.Context, req CreateTemplateRequest) (TemplateSummary, error)
+	DeleteTemplate(ctx context.Context, id uint) error
+}
