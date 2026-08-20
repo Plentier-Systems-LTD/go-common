@@ -31,6 +31,9 @@ type User interface {
 	SetEmailVerified(verified bool)
 	GetLastLoginAt() *time.Time
 	SetLastLoginAt(t time.Time)
+	IsGuest() bool
+	SetGuest(guestKey string)
+	GetGuestKey() *string
 }
 
 // BaseUser holds the fields every project needs for authentication.
@@ -51,6 +54,11 @@ type BaseUser struct {
 	LastLoginAt   *time.Time `json:"lastLoginAt,omitempty"`
 	CreatedAt     time.Time  `gorm:"autoCreateTime" json:"createdAt"`
 	UpdatedAt     time.Time  `gorm:"autoUpdateTime" json:"updatedAt"`
+
+	// Guest marks a throwaway account created via Service.ContinueAsGuest, identified by GuestKey rather than a real email/password.
+	Guest bool `gorm:"not null;default:false" json:"isGuest"`
+	// GuestKey is the client-persisted identifier ContinueAsGuest looks accounts up by — unique so one device's guest identity always resolves to the same account.
+	GuestKey *string `gorm:"uniqueIndex" json:"-"`
 }
 
 // NewBaseUser builds a BaseUser ready for password registration: a fresh
@@ -109,4 +117,25 @@ func (u *BaseUser) GetLastLoginAt() *time.Time {
 
 func (u *BaseUser) SetLastLoginAt(t time.Time) {
 	u.LastLoginAt = &t
+}
+
+func (u *BaseUser) IsGuest() bool {
+	return u.Guest
+}
+
+// SetGuest marks u as a guest account under guestKey, filling in an ID and a synthetic unique email if not already set — ContinueAsGuest calls this on a freshly-built user, so callers never invent a guest email themselves.
+func (u *BaseUser) SetGuest(guestKey string) {
+	if u.ID == "" {
+		u.ID = uuid.NewString()
+	}
+	if u.Email == "" {
+		u.Email = NormalizeEmail("guest-" + guestKey + "@guest.invalid")
+	}
+	u.Provider = ProviderPassword
+	u.Guest = true
+	u.GuestKey = &guestKey
+}
+
+func (u *BaseUser) GetGuestKey() *string {
+	return u.GuestKey
 }

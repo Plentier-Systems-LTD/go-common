@@ -208,6 +208,40 @@ func (s *Service[T]) OAuthLogin(ctx context.Context, provider Provider, idToken 
 	return user, tokens, true, nil
 }
 
+// ContinueAsGuest returns the existing guest account for guestKey (a caller-persisted, stable per-device identifier), or creates one via newUser the first time it's seen; the bool reports whether a new account was created.
+func (s *Service[T]) ContinueAsGuest(ctx context.Context, guestKey string, newUser func() T) (T, *TokenPair, bool, error) {
+	var zero T
+
+	if guestKey == "" {
+		return zero, nil, false, errors.New("auth: guestKey is required")
+	}
+
+	if user, err := s.store.FindByGuestKey(ctx, guestKey); err == nil {
+		user.SetLastLoginAt(time.Now())
+		if err := s.store.Update(ctx, user); err != nil {
+			return zero, nil, false, fmt.Errorf("auth: failed to record login: %w", err)
+		}
+		tokens, err := GenerateTokenPair(s.cfg, user.GetID(), user.GetEmail())
+		return user, tokens, false, err
+	} else if !errors.Is(err, ErrUserNotFound) {
+		return zero, nil, false, err
+	}
+
+	user := newUser()
+	user.SetGuest(guestKey)
+	user.SetLastLoginAt(time.Now())
+
+	if err := s.store.Create(ctx, user); err != nil {
+		return zero, nil, false, fmt.Errorf("auth: failed to create guest user: %w", err)
+	}
+
+	tokens, err := GenerateTokenPair(s.cfg, user.GetID(), user.GetEmail())
+	if err != nil {
+		return zero, nil, false, err
+	}
+	return user, tokens, true, nil
+}
+
 // Refresh verifies a refresh token, confirms the user still exists, and
 // issues a new token pair.
 func (s *Service[T]) Refresh(ctx context.Context, refreshToken string) (*TokenPair, error) {

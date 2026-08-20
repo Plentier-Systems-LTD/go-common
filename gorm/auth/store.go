@@ -61,6 +61,10 @@ func (s *Store[T, PT]) FindByProvider(ctx context.Context, provider sharedauth.P
 	return s.find(ctx, "provider = ? AND provider_id = ?", provider, providerID)
 }
 
+func (s *Store[T, PT]) FindByGuestKey(ctx context.Context, guestKey string) (PT, error) {
+	return s.find(ctx, "guest_key = ?", guestKey)
+}
+
 func (s *Store[T, PT]) find(ctx context.Context, query string, args ...any) (PT, error) {
 	var row T
 	err := s.db.WithContext(ctx).Where(query, args...).First(&row).Error

@@ -14,4 +14,5 @@ type UserStore[T User] interface {
 	FindByID(ctx context.Context, id string) (T, error)
 	FindByEmail(ctx context.Context, email string) (T, error)
 	FindByProvider(ctx context.Context, provider Provider, providerID string) (T, error)
+	FindByGuestKey(ctx context.Context, guestKey string) (T, error)
 }
